@@ -793,10 +793,10 @@ async function tryFetch(url, opt) {
   let program = new commander.Command();
   program
     .option('-q, --queue <queue>', '`jobs` or `jobs-success`', 'jobs-success')
-    .option('-s, --no-state', 'only generate a jobs report');
+    .option('-s, --state', 'only generate a jobs report', true);
   program.parse(process.argv);
 
-  if (!program.noState) {
+  if (program.state) {
     const shares = await getState();
     createUserAccess(shares.tradingPartners);
     createDocumentShares(shares.documents);
