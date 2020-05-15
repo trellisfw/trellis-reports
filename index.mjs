@@ -646,7 +646,8 @@ function getAuditDetails(vdoc) {
       'coi expiration date': '',
       'audit organization name': vdoc.organization.name,
       'audit expiration date': moment(
-        vdoc.certificate_validity_period.end
+        vdoc.certificate_validity_period.end,
+        'MM/DD/YYYY'
       ).format('MM/DD/YYYY'),
       'audit score': `${vdoc.score.final.value} ${vdoc.score.final.units}`,
     };
