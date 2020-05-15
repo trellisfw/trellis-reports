@@ -356,20 +356,43 @@ async function getJobsFuture(_conn, jobs) {
         share = await tryFetch(
           `${TRELLIS_URL}/bookmarks/services/trellis-shares/jobs-success/${sid}`,
           fetchOptions
-        ).then((res) => res.json());
+        ).then((res) => {
+          if (res.status === 404) {
+            warn(`Failed to fetch share ${sid} ${res.status}`);
+          }
+          return res.json();
+        });
       } catch (e) {
         error(`Failed to fetch share ${sid} %O', e`);
         return;
       }
+      // trace('share: %O', share);
+      if (!share.hasOwnProperty('_id')) {
+        return;
+      }
+      // delete share._id;
+      // delete share._rev;
+      // delete share._meta;
+      // delete share._type;
 
       let vdoc;
       try {
         vdoc = await tryFetch(
           `${TRELLIS_URL}${share.config.src}`,
           fetchOptions
-        ).then((res) => res.json());
+        ).then((res) => {
+          if (res.status === 404) {
+            warn(
+              `Failed to fetch vdoc (${share.config.src}) in share ${sid} ${res.status}`
+            );
+          }
+          return res.json();
+        });
       } catch (e) {
-        error(`Failed to fetch document shared in job ${sid} %O', e`);
+        error(`Failed to fetch document shared in job ${sid} %O`, e);
+        return;
+      }
+      if (!vdoc.hasOwnProperty('_id')) {
         return;
       }
 
@@ -381,9 +404,19 @@ async function getJobsFuture(_conn, jobs) {
             .slice(0, -2)
             .join('/')}`,
           fetchOptions
-        ).then((res) => res.json());
+        ).then((res) => {
+          if (res.status === 404) {
+            warn(
+              `Failed to fetch partner (${share.config.chroot}) in share ${sid} ${res.status}`
+            );
+          }
+          return res.json();
+        });
       } catch (e) {
         error(`Failed to fetch partner in share job ${sid} %O', e`);
+        return;
+      }
+      if (!partner.hasOwnProperty('_id')) {
         return;
       }
 
@@ -492,15 +525,28 @@ async function getFinishedShares(shares, day) {
         error(`Failed to fetch share ${sid} %O', e`);
         return;
       }
+      if (!share.hasOwnProperty('_id')) {
+        return;
+      }
 
       let vdoc;
       try {
         vdoc = await tryFetch(
           `${TRELLIS_URL}${share.config.src}`,
           fetchOptions
-        ).then((res) => res.json());
+        ).then((res) => {
+          if (res.status === 404) {
+            warn(
+              `Failed to fetch vdoc (${share.config.src}) in share ${sid} ${res.status}`
+            );
+          }
+          return res.json();
+        });
       } catch (e) {
-        error(`Failed to fetch document shared in job ${sid} %O', e`);
+        error(`Failed to fetch document shared in job ${sid} %O`, e);
+        return;
+      }
+      if (!vdoc.hasOwnProperty('_id')) {
         return;
       }
 
@@ -512,9 +558,19 @@ async function getFinishedShares(shares, day) {
             .slice(0, -2)
             .join('/')}`,
           fetchOptions
-        ).then((res) => res.json());
+        ).then((res) => {
+          if (res.status === 404) {
+            warn(
+              `Failed to fetch partner (${share.config.chroot}) in share ${sid} ${res.status}`
+            );
+          }
+          return res.json();
+        });
       } catch (e) {
         error(`Failed to fetch partner in share job ${sid} %O', e`);
+        return;
+      }
+      if (!partner.hasOwnProperty('_id')) {
         return;
       }
 
@@ -578,6 +634,7 @@ function getCoiDetails(vdoc) {
 
 function getAuditDetails(vdoc) {
   try {
+    trace(`date: ${vdoc.certificate_validity_period.end}`);
     return {
       'document id': vdoc._id,
       'document type': 'audit',
