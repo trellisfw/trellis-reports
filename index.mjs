@@ -333,10 +333,13 @@ async function getTrellisShares(_conn, queue, dates) {
     error('failed to get trellis shares %O', e);
     return;
   }
-
   if (!jobs.hasOwnProperty('_id')) {
     return;
   }
+  delete jobs._id;
+  delete jobs._meta;
+  delete jobs._rev;
+  delete jobs._type;
 
   switch (queue) {
     case 'jobs':
@@ -354,7 +357,7 @@ async function getJobsFuture(_conn, jobs) {
       let share;
       try {
         share = await tryFetch(
-          `${TRELLIS_URL}/bookmarks/services/trellis-shares/jobs-success/${sid}`,
+          `${TRELLIS_URL}/bookmarks/services/trellis-shares/jobs/${sid}`,
           fetchOptions
         ).then((res) => {
           if (res.status === 404) {
@@ -370,10 +373,6 @@ async function getJobsFuture(_conn, jobs) {
       if (!share.hasOwnProperty('_id')) {
         return;
       }
-      // delete share._id;
-      // delete share._rev;
-      // delete share._meta;
-      // delete share._type;
 
       let vdoc;
       try {
@@ -389,7 +388,7 @@ async function getJobsFuture(_conn, jobs) {
           return res.json();
         });
       } catch (e) {
-        error(`Failed to fetch document shared in job ${sid} %O`, e);
+        error(`Failed to fetch document shared in job ${sid} %O: %O`, share, e);
         return;
       }
       if (!vdoc.hasOwnProperty('_id')) {
@@ -437,12 +436,7 @@ async function getJobsFuture(_conn, jobs) {
         'trading partner id': partner.masterid,
         'trading partner name': partner.name,
         'recipient email address': partnerEmail,
-        'event time': moment(
-          Object.values(share.updates)
-            .filter((s) => s.status === 'start')
-            .map((s) => s.time)
-            .shift()
-        ).format('MM/DD/YYYY hh:mm'),
+        'event time': 'awaiting approval',
         'event type': 'share',
         ...details,
       };
@@ -543,7 +537,7 @@ async function getFinishedShares(shares, day) {
           return res.json();
         });
       } catch (e) {
-        error(`Failed to fetch document shared in job ${sid} %O`, e);
+        error(`Failed to fetch document shared in job ${sid} %O: %O`, share, e);
         return;
       }
       if (!vdoc.hasOwnProperty('_id')) {
@@ -776,27 +770,48 @@ function createUserAccess(tradingPartners) {
 function createEventLog(data) {
   trace('event log %O', data.trellisShares);
   trace('Generating event report');
-  const ws = XLSX.utils.json_to_sheet(data.trellisShares, {
-    Headers: [
-      'document type',
-      'share status',
-      'document filename',
-      'coi holder name',
-      'coi producer name',
-      'coi insured name',
-      'upload date',
-      'coi expiration date',
-      'audit organization name',
-      'audit expiration date',
-      'audit score',
-      'trading partner name',
-      'trading partner masterid',
-      'email address',
-      'trellisid',
-      'event time',
-      'event type',
-    ],
-  });
+  const ws = XLSX.utils.json_to_sheet(
+    data.trellisShares.filter((d) => d !== null && d !== undefined),
+    {
+      Headers: [
+        'document id',
+        'document name',
+        'document type',
+        'upload date',
+        'coi expiration date',
+        'coi holder',
+        'coi producer',
+        'coi insured',
+        'audit organization name',
+        'audit expiration date',
+        'audit score',
+        'trading partner id',
+        'trading partner name',
+        'recipient email address',
+        'event time',
+        'event type',
+      ],
+      // Headers: [
+      //   'document type',
+      //   'share status',
+      //   'document filename',
+      //   'coi holder name',
+      //   'coi producer name',
+      //   'coi insured name',
+      //   'upload date',
+      //   'coi expiration date',
+      //   'audit organization name',
+      //   'audit expiration date',
+      //   'audit score',
+      //   'trading partner name',
+      //   'trading partner masterid',
+      //   'email address',
+      //   'trellisid',
+      //   'event time',
+      //   'event type',
+      // ],
+    }
+  );
   const wb = XLSX.utils.book_new();
   XLSX.utils.book_append_sheet(wb, ws);
   XLSX.writeFile(wb, `${moment().format('YYYY-MM-DD')}_event_log.xlsx`);
@@ -851,10 +866,11 @@ async function tryFetch(url, opt) {
   let program = new commander.Command();
   program
     .option('-q, --queue <queue>', '`jobs` or `jobs-success`', 'jobs-success')
-    .option('-s, --state', 'only generate a jobs report', true);
+    .option('-s, --state <state>', 'only generate a jobs report', 'true');
   program.parse(process.argv);
 
-  if (program.state) {
+  if (program.state.toLowerCase() === 'true') {
+    console.log(program.state);
     const shares = await getState();
     createUserAccess(shares.tradingPartners);
     createDocumentShares(shares.documents);
