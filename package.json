@@ -1,0 +1,29 @@
+{
+  "name": "report-generator",
+  "version": "1.0.0",
+  "description": "Generate reoprts about tasks that need approval to be completed",
+  "main": "index.mjs",
+  "repository": "holder",
+  "author": "Nathan Givens <nathan@qlever.io>",
+  "license": "MIT",
+  "private": true,
+  "dependencies": {
+    "-": "^0.0.1",
+    "@oada/oada-jobs": "oada/oada-jobs",
+    "bluebird": "^3.7.2",
+    "commander": "^5.1.0",
+    "debug": "^4.1.1",
+    "moment": "^2.25.1",
+    "nconf": "^0.10.0",
+    "node-fetch": "^2.6.0",
+    "xlsx": "^0.15.6"
+  },
+  "devDependencies": {
+    "@types/debug": "^4.1.5",
+    "@types/node": "^13.11.1",
+    "eslint": "^6.8.0",
+    "prettier": "^2.0.4",
+    "ts-node": "^8.8.2",
+    "typescript": "^3.8.3"
+  }
+}
