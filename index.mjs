@@ -1,5 +1,5 @@
 import debug from 'debug';
-import { JobQueue } from '@oada/oada-jobs';
+// import { JobQueue } from '@oada/oada-jobs';
 import fetch from 'node-fetch';
 import XLSX from 'xlsx';
 import Promise from 'bluebird';
@@ -21,31 +21,7 @@ const fetchOptions = {
   },
 };
 
-const reportGen = new JobQueue('report-gen', generateReport, {
-  concurrency: 1,
-  domain: TRELLIS_URL,
-  token: TRELLIS_TOKEN,
-});
-
-async function generateReport(resourceId, task, conn) {
-  info(`Generating report ${resourceId}`);
-
-  const currentShares = getCurrentShares(conn);
-  trace(
-    `Creating report for ${Object.keys(currentShares).length} trading partners`
-  );
-  // console.log(currentShares);
-
-  const book = createXLSX(task);
-  const opts = { bookType: 'xlsx', bookSST: false, type: 'base64' };
-  wbStream = XLSX.writeFile(book, opts);
-  // wbRes = await fetch(``, { method: 'POST', body: wbStream }).then((res) =>
-  //   res.json()
-  // );
-  // return;
-}
-
-async function getCurrentShares(_conn) {
+async function getState(_conn) {
   // const tradingPartners = await conn.get('/bookmarks/trellisfw/trading-partners');
   let tradingPartners;
   try {
@@ -332,20 +308,20 @@ async function getAuditShares(tradingPartners, audits, aid) {
   return;
 }
 
-async function getHistory(_conn, dates) {
+async function getShares(_conn, queue, dates) {
   trace('Get Share History');
-  const trellisShares = await getTrellisShares({}, dates);
+  const trellisShares = await getTrellisShares({}, queue, dates);
   const emailShares = {}; // await getEmailShares();
   trace('trellis shares: %O', trellisShares);
   return { trellisShares: trellisShares.flat(), emailShares };
 }
 
-async function getTrellisShares(_conn, dates) {
+async function getTrellisShares(_conn, queue, dates) {
   let jobs;
   try {
-    trace('Getting jobs-success list');
+    trace(`Getting ${queue} list`);
     jobs = await tryFetch(
-      `${TRELLIS_URL}/bookmarks/services/trellis-shares/jobs-success`,
+      `${TRELLIS_URL}/bookmarks/services/trellis-shares/${queue}`,
       fetchOptions
     ).then((res) => {
       if (res.status === 404) {
@@ -362,6 +338,87 @@ async function getTrellisShares(_conn, dates) {
     return;
   }
 
+  switch (queue) {
+    case 'jobs':
+      return getJobsFuture(_conn, jobs);
+    case 'jobs-success':
+      return getJobsSuccess(_conn, jobs, dates);
+  }
+}
+
+async function getJobsFuture(_conn, jobs) {
+  return Promise.map(
+    Object.keys(jobs),
+    async (sid) => {
+      trace(`Getting data for share id: ${sid}`);
+      let share;
+      try {
+        share = await tryFetch(
+          `${TRELLIS_URL}/bookmarks/services/trellis-shares/jobs-success/${sid}`,
+          fetchOptions
+        ).then((res) => res.json());
+      } catch (e) {
+        error(`Failed to fetch share ${sid} %O', e`);
+        return;
+      }
+
+      let vdoc;
+      try {
+        vdoc = await tryFetch(
+          `${TRELLIS_URL}${share.config.src}`,
+          fetchOptions
+        ).then((res) => res.json());
+      } catch (e) {
+        error(`Failed to fetch document shared in job ${sid} %O', e`);
+        return;
+      }
+
+      let partner;
+      try {
+        partner = await tryFetch(
+          `${TRELLIS_URL}${share.config.chroot
+            .split('/')
+            .slice(0, -2)
+            .join('/')}`,
+          fetchOptions
+        ).then((res) => res.json());
+      } catch (e) {
+        error(`Failed to fetch partner in share job ${sid} %O', e`);
+        return;
+      }
+
+      let details;
+      let partnerEmail;
+      switch (share.config.doctype) {
+        case 'cois':
+          partnerEmail = partner['coi-emails'];
+          details = getCoiDetails(vdoc);
+          break;
+        case 'audit':
+          partnerEmail = partner['fsqa-emails'];
+          details = getAuditDetails(vdoc);
+          break;
+      }
+
+      return {
+        'trading partner id': partner.masterid,
+        'trading partner name': partner.name,
+        'recipient email address': partnerEmail,
+        'event time': moment(
+          Object.values(share.updates)
+            .filter((s) => s.status === 'start')
+            .map((s) => s.time)
+            .shift()
+        ).format('MM/DD/YYYY hh:mm'),
+        'event type': 'share',
+        ...details,
+      };
+    },
+    { concurrency: 10 }
+  );
+}
+
+async function getJobsSuccess(_conn, jobs, dates) {
   if (dates === undefined || dates.length === 0) {
     dates = [
       moment
@@ -409,7 +466,7 @@ async function getTrellisShares(_conn, dates) {
       delete shares._type;
       delete shares._meta;
 
-      let completed = await getShareSuccess(shares, day);
+      let completed = await getFinishedShares(shares, day);
       trace(`complete tasks for ${day} %O`, completed);
       // completed.concat(await getShareFail(shares));
       // completed.concat(await getEmailSuccess(shares));
@@ -420,7 +477,7 @@ async function getTrellisShares(_conn, dates) {
   );
 }
 
-async function getShareSuccess(shares, day) {
+async function getFinishedShares(shares, day) {
   return Promise.map(
     Object.keys(shares),
     async (sid) => {
@@ -700,7 +757,7 @@ function createSheets(shares, events) {
   );
   XLSX.writeFile(docShares, `${date}_document_shares.xlsx`);
   info('Document share report written');
-
+ 
   // info('Creating user access report');
   // let userAccess = XLSX.utils.book_new();
   // XLSX.utils.book_append_sheet(
@@ -709,7 +766,7 @@ function createSheets(shares, events) {
   // );
   // XLSX.writeFile(userAccess, `${date}_user_access.xlsx`);
   // info('User access report written');
-
+ 
   // info('Creating event log report');
   // let eventLog = XLSX.utils.book_new();
   // XLSX.utils.book_append_sheet(eventLog, createEventLog(events));
@@ -736,65 +793,15 @@ async function tryFetch(url, opt) {
   let program = new commander.Command();
   program
     .option('-q, --queue <queue>', '`jobs` or `jobs-success`', 'jobs-success')
-    .option('-s, --no-share', 'only generate a jobs report');
+    .option('-s, --no-state', 'only generate a jobs report');
   program.parse(process.argv);
 
-  if (!program.noShare) {
-    // console.log('no share');
-    const shares = await getCurrentShares();
-    createUserAccess(shares.tradingPartners);
-    createDocumentShares(shares.documents);
+  if (!program.noState) {
+    console.log('state');
+    // const shares = await getState();
+    // createUserAccess(shares.tradingPartners);
+    // createDocumentShares(shares.documents);
   }
-  let jobs;
-  switch (jobs) {
-    case 'jobs':
-      break;
-    case 'jobs-success':
-      break;
-    default:
-  }
-
-  // trace('Getting current shares');
-  // const shares = await getCurrentShares();
-  // const history = await getHistory();
-  // createSheets(shares, {});
-  // createSheets(shares, history);
-
-  // const events = await getHistory({});
-  // console.log(events);
-  // trace('Generating XLSX file');
-  // const wb = XLSX.utils.book_new();
-  // const ws = await createEventLog(events);
-  // XLSX.utils.book_append_sheet(wb, ws);
-  // trace('Writing XLSX file');
-  // XLSX.writeFile(wb, 'demo.xlsx');
-  // trace('Finished writing XLSX file');
-
-  // console.log(currentShares);
-
-  // const events = await getHistory({});
-  // console.log(events);
-  // trace('Generating XLSX file');
-  // const wb = await createXLSX({}, events.trellis);
-  // trace('Writing XLSX file');
-  // XLSX.writeFile(wb, 'demo.xlsx');
-  // trace('Finished writing XLSX file');
-
-  // console.log(history);
-
-  // trace('Getting history');
-  // const events = await getHistory({});
-  // trace('Generating XLSX file');
-  // const wb = await createXLSX(currentShares, events);
-  // trace('Writing XLSX file');
-  // XLSX.writeFile(wb, 'demo.xlsx');
+  let jobs = await getShares({}, program.queue);
+  createEventLog(jobs);
 })();
-
-// (async () => {
-//   trace("Starting report generation");
-//   try {
-//     await reportGen.start();
-//   } catch (e) {
-//     error("%O", e);
-//   }
-// })();
