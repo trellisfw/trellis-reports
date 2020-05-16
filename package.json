@@ -1,12 +1,15 @@
 {
-  "name": "report-generator",
+  "name": "trellis-reports",
   "version": "1.0.0",
-  "description": "Generate reoprts about tasks that need approval to be completed",
+  "description": "Generate reports about what is currently in trellis, sharing, etc.",
   "main": "index.mjs",
   "repository": "holder",
   "author": "Nathan Givens <nathan@qlever.io>",
-  "license": "MIT",
+  "license": "Apache-2.0",
   "private": true,
+  "scripts": {
+    "start": "node index.js"
+  },
   "dependencies": {
     "-": "^0.0.1",
     "@oada/oada-jobs": "oada/oada-jobs",

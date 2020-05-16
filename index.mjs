@@ -12,14 +12,52 @@ const trace = debug('report-gen:trace');
 const warn = debug('report-gen:warn');
 const error = debug('report-gen:error');
 
-const TRELLIS_URL = `https://${config.get('trellis_url')}`;
-const TRELLIS_TOKEN = config.get('trellis_token');
-
-const fetchOptions = {
+// These can be overrided with -d and/or -t on command line
+let TRELLIS_URL = `https://${config.get('domain')}`;
+let TRELLIS_TOKEN = config.get('token');
+let fetchOptions = {
   headers: {
-    Authorization: `Bearer ${TRELLIS_TOKEN}`,
+    Authorization: `Bearer ${TRELLIS_TOKEN}`, // resets below if command-line -t
   },
 };
+
+(async () => {
+  let program = new commander.Command();
+  program
+    .option('-q, --queue <queue>', '`jobs` or `jobs-success`', 'jobs-success')
+    .option('-s, --state <state>', 'only generate a jobs report', 'true')
+    .option('-d --domain <domain>', 'domain without https', 'localhost')
+    .option('-t --token <token>', 'token', 'god')
+  program.parse(process.argv);
+
+  if (program.domain) {
+    program.domain = program.domain.replace(/^https:\/\//,''); // tolerate if they put the https on the front
+    TRELLIS_URL = 'https://'+program.domain;
+    trace(`Using command-line domain, final domain is: ${TRELLIS_URL}`);
+  }
+  if (program.token) {
+    TRELLIS_TOKEN = program.token;
+    fetchOptions.headers.Authorization = `Bearer ${TRELLIS_TOKEN}`; // need to reset 
+    trace(`Using command-line token, final token is: ${TRELLIS_TOKEN}`);
+  }
+
+  if (TRELLIS_URL === 'https://localhost') {
+    trace(`Setting NODE_TLS_REJECT_UNAUTHORIZED = 0 because domain is localhost`);
+    process.env.NODE_TLS_REJECT_UNAUTHORIZED = 0;
+  }
+
+  if (program.state.toLowerCase() === 'true') {
+    console.log(program.state);
+    const shares = await getState();
+    createUserAccess(shares.tradingPartners);
+    createDocumentShares(shares.documents);
+  }
+
+  trace(`Starting getShares`);
+  let jobs = await getShares({}, program.queue);
+  createEventLog(jobs);
+})();
+
 
 async function getState(_conn) {
   // const tradingPartners = await conn.get('/bookmarks/trellisfw/trading-partners');
@@ -862,19 +900,4 @@ async function tryFetch(url, opt) {
   }
 }
 
-(async () => {
-  let program = new commander.Command();
-  program
-    .option('-q, --queue <queue>', '`jobs` or `jobs-success`', 'jobs-success')
-    .option('-s, --state <state>', 'only generate a jobs report', 'true');
-  program.parse(process.argv);
 
-  if (program.state.toLowerCase() === 'true') {
-    console.log(program.state);
-    const shares = await getState();
-    createUserAccess(shares.tradingPartners);
-    createDocumentShares(shares.documents);
-  }
-  let jobs = await getShares({}, program.queue);
-  createEventLog(jobs);
-})();

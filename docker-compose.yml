@@ -1,0 +1,26 @@
+version: "3"
+
+services:
+  ##########################################
+  # Overrides for oada-core services:
+  ##########################################
+
+  # Add ourselves to admin container:
+  admin:
+    volumes:
+      - ./services-available/trellis-reports:/code/trellis-reports
+
+
+  ###############################################
+  # This service's definition:
+  ###############################################
+  trellis-reports:
+    build:
+      context: ./services-available/trellis-reports
+    container_name: trellis-reports
+    restart: always
+    volumes:
+      - ./services-available/trellis-reports/daily:/etc/cron.daily
+      - ./services-available/trellis-reports:/code/trellis-reports
+    command: crond -f -d 8
+
