@@ -1,11 +1,12 @@
 import debug from 'debug';
 // import { JobQueue } from '@oada/oada-jobs';
-import fetch from 'node-fetch';
+// import fetch from 'node-fetch';
 import XLSX from 'xlsx';
 import Promise from 'bluebird';
 import config from './config.js';
 import moment from 'moment';
 import commander from 'commander';
+import client from '@oada/client';
 
 const info = debug('report-gen:info');
 const trace = debug('report-gen:trace');
@@ -15,11 +16,11 @@ const error = debug('report-gen:error');
 // These can be overrided with -d and/or -t on command line
 let TRELLIS_URL = `https://${config.get('domain')}`;
 let TRELLIS_TOKEN = config.get('token');
-let fetchOptions = {
-  headers: {
-    Authorization: `Bearer ${TRELLIS_TOKEN}`, // resets below if command-line -t
-  },
-};
+// let fetchOptions = {
+//   headers: {
+//     Authorization: `Bearer ${TRELLIS_TOKEN}`, // resets below if command-line -t
+//   },
+// };
 
 (async () => {
   let program = new commander.Command();
@@ -27,51 +28,68 @@ let fetchOptions = {
     .option('-q, --queue <queue>', '`jobs` or `jobs-success`', 'jobs-success')
     .option('-s, --state <state>', 'only generate a jobs report', 'true')
     .option('-d --domain <domain>', 'domain without https', 'localhost')
-    .option('-t --token <token>', 'token', 'god')
+    .option('-t --token <token>', 'token', 'god');
   program.parse(process.argv);
 
   if (program.domain) {
-    program.domain = program.domain.replace(/^https:\/\//,''); // tolerate if they put the https on the front
-    TRELLIS_URL = 'https://'+program.domain;
+    program.domain = program.domain.replace(/^https:\/\//, ''); // tolerate if they put the https on the front
+    TRELLIS_URL = 'https://' + program.domain;
     trace(`Using command-line domain, final domain is: ${TRELLIS_URL}`);
   }
   if (program.token) {
     TRELLIS_TOKEN = program.token;
-    fetchOptions.headers.Authorization = `Bearer ${TRELLIS_TOKEN}`; // need to reset 
+    // fetchOptions.headers.Authorization = `Bearer ${TRELLIS_TOKEN}`; // need to reset
     trace(`Using command-line token, final token is: ${TRELLIS_TOKEN}`);
   }
 
   if (TRELLIS_URL === 'https://localhost') {
-    trace(`Setting NODE_TLS_REJECT_UNAUTHORIZED = 0 because domain is localhost`);
+    trace(
+      `Setting NODE_TLS_REJECT_UNAUTHORIZED = 0 because domain is localhost`
+    );
     process.env.NODE_TLS_REJECT_UNAUTHORIZED = 0;
   }
 
+  let conn;
+  try {
+    conn = await client.connect({
+      domain: TRELLIS_URL,
+      token: TRELLIS_TOKEN,
+      // concurrency: 10,
+    });
+  } catch (e) {
+    error('Failed to open connection %O', e);
+    return;
+  }
+
   if (program.state.toLowerCase() === 'true') {
-    console.log(program.state);
-    const shares = await getState();
+    // console.log(program.state);
+    const shares = await getState(conn);
     createUserAccess(shares.tradingPartners);
     createDocumentShares(shares.documents);
   }
 
   trace(`Starting getShares`);
-  let jobs = await getShares({}, program.queue);
+  let jobs = await getShares(conn, program.queue);
   createEventLog(jobs);
 })();
 
-
-async function getState(_conn) {
+async function getState(conn) {
   // const tradingPartners = await conn.get('/bookmarks/trellisfw/trading-partners');
+  trace('Getting trading partner list');
   let tradingPartners;
   try {
-    tradingPartners = await tryFetch(
-      `${TRELLIS_URL}/bookmarks/trellisfw/trading-partners`,
-      fetchOptions
-    ).then((res) => res.json());
+    tradingPartners = await tryFetch(conn, {
+      path: '/bookmarks/trellisfw/trading-partners',
+    }).then((res) => res.data);
   } catch (e) {
     error('Failed to get list of trading partners %O', e);
     return;
   }
   // is there a better way to avoid these?
+  if (!tradingPartners.hasOwnProperty('_id')) {
+    return { tradingPartners: {}, documents: {} };
+  }
+
   delete tradingPartners._id;
   delete tradingPartners._rev;
   delete tradingPartners._type;
@@ -85,15 +103,9 @@ async function getState(_conn) {
       info(`Getting documents for trading partner ${pid}`);
       let partner;
       try {
-        partner = await tryFetch(
-          `${TRELLIS_URL}/bookmarks/trellisfw/trading-partners/${pid}`,
-          fetchOptions
-        ).then((res) => {
-          if (res.status === 404) {
-            warn(`Failed to fetch trading partner ${res.status}`);
-          }
-          return res.json();
-        });
+        partner = await tryFetch(conn, {
+          path: `/bookmarks/trellisfw/trading-partners/${pid}`,
+        }).then((res) => res.data);
       } catch (e) {
         error(`Failed to get trading partner ${pid} %O`, e);
         return;
@@ -105,56 +117,56 @@ async function getState(_conn) {
 
       tradingPartners[pid] = {
         'trading partner name': partner.name,
-        'trading partner id': partner.masterid,
+        'trading partner masterid': partner.masterid,
         documents: {},
       };
 
       // these add to currentShares
-      await getPartnerCois(tradingPartners, pid);
-      await getPartnerAudits(tradingPartners, pid);
+      await getPartnerCois(conn, tradingPartners, pid);
+      await getPartnerAudits(conn, tradingPartners, pid);
     },
     { concurrency: 10 }
   );
 
+  trace('Getting COI list');
   let cois;
   try {
-    cois = await tryFetch(
-      `${TRELLIS_URL}/bookmarks/trellisfw/cois`,
-      fetchOptions
-    ).then((res) => {
-      if (res.status === 404) {
-        warn(`Failed to fetch cois ${res.status}`);
-      }
-      return res.json();
-    });
+    cois = await tryFetch(conn, {
+      path: `/bookmarks/trellisfw/cois`,
+    }).then((res) => res.data);
   } catch (e) {
     error('Failed to get list of COIs %O', e);
+    return { tradingPartners, documents: {} };
   }
 
-  if (cois.hasOwnProperty('_id')) {
-    delete cois._id;
-    delete cois._rev;
-    delete cois._meta;
-    delete cois._type;
-
-    await Promise.map(Object.keys(cois), async (coi) => {
-      await getCoiShares(tradingPartners, cois, coi);
-    });
+  // trace('COIs: %O', cois);
+  if (!cois.hasOwnProperty('_id')) {
+    return { tradingPartners, documents: {} };
   }
+  trace('Getting COI Shares');
+  delete cois._id;
+  delete cois._rev;
+  delete cois._meta;
+  delete cois._type;
 
+  await Promise.map(
+    Object.keys(cois),
+    async (coi) => {
+      trace(`Getting COI ${coi}`);
+      await getCoiShares(conn, tradingPartners, cois, coi);
+    },
+    { concurrency: 10 }
+  );
+
+  trace('Getting Audit Shares');
   let audits;
   try {
-    audits = await tryFetch(
-      `${TRELLIS_URL}/bookmarks/trellisfw/fsqa-audits`,
-      fetchOptions
-    ).then((res) => {
-      if (res.status === 404) {
-        warn(`Failed to fetch audits ${res.status}`);
-      }
-      return res.json();
-    });
+    audits = await tryFetch(conn, {
+      path: `/bookmarks/trellisfw/fsqa-audits`,
+    }).then((res) => res.data);
   } catch (e) {
     error('Failed to get list of audits %O', e);
+    return { tradingPartners, documents: { ...cois } };
   }
 
   if (audits.hasOwnProperty('_id')) {
@@ -164,25 +176,20 @@ async function getState(_conn) {
     delete audits._type;
 
     await Promise.map(Object.keys(audits), async (aid) => {
-      await getCoiShares(tradingPartners, audits, aid);
+      trace(`Getting Audit ${aid}`);
+      await getAuditShares(conn, tradingPartners, audits, aid);
     });
   }
 
   return { tradingPartners, documents: { ...cois, ...audits } };
 }
 
-async function getPartnerCois(tradingPartners, pid) {
+async function getPartnerCois(conn, tradingPartners, pid) {
   let cois;
   try {
-    cois = await tryFetch(
-      `${TRELLIS_URL}/bookmarks/trellisfw/trading-partners/${pid}/user/bookmarks/trellisfw/cois`,
-      fetchOptions
-    ).then((res) => {
-      if (res.status === 404) {
-        warn(`Failed to fetch cois for partner ${pid} ${res.status}`);
-      }
-      return res.json();
-    });
+    cois = await tryFetch(conn, {
+      path: `/bookmarks/trellisfw/trading-partners/${pid}/user/bookmarks/trellisfw/cois`,
+    }).then((res) => res.data);
   } catch (e) {
     error(`Failed to get list of COIs for partner ${pid}`, e);
     return;
@@ -200,15 +207,9 @@ async function getPartnerCois(tradingPartners, pid) {
     trace(`Getting coi ${coi}`);
     let vdoc;
     try {
-      vdoc = await tryFetch(
-        `${TRELLIS_URL}/bookmarks/trellisfw/trading-partners/${pid}/user/bookmarks/trellisfw/cois/${coi}`,
-        fetchOptions
-      ).then((res) => {
-        if (res.status === 404) {
-          warn(`Failed to fetch coi ${coi}`);
-        }
-        return res.json();
-      });
+      vdoc = await tryFetch(conn, {
+        path: `/bookmarks/trellisfw/trading-partners/${pid}/user/bookmarks/trellisfw/cois/${coi}`,
+      }).then((res) => res.data);
     } catch (e) {
       error(`Failed to fetch coi ${coi} %O`, e);
       return;
@@ -224,18 +225,12 @@ async function getPartnerCois(tradingPartners, pid) {
   });
 }
 
-async function getPartnerAudits(tradingPartners, pid) {
+async function getPartnerAudits(conn, tradingPartners, pid) {
   let audits;
   try {
-    audits = await tryFetch(
-      `${TRELLIS_URL}/bookmarks/trellisfw/trading-partners/${pid}/user/bookmarks/trellisfw/fsqa-audits`,
-      fetchOptions
-    ).then((res) => {
-      if (res.status === 404) {
-        warn(`Failed to fetch audits for partner ${pid} ${res.status}`);
-      }
-      return res.json();
-    });
+    audits = await tryFetch(conn, {
+      path: `/bookmarks/trellisfw/trading-partners/${pid}/user/bookmarks/trellisfw/fsqa-audits`,
+    }).then((res) => res.data);
   } catch (e) {
     error(`Failed to get list of audits for partner ${pid} %O`, e);
     return;
@@ -252,15 +247,9 @@ async function getPartnerAudits(tradingPartners, pid) {
   Promise.each(Object.keys(audits), async (audit) => {
     let vdoc;
     try {
-      vdoc = await tryFetch(
-        `${TRELLIS_URL}/bookmarks/trellisfw/trading-partners/${pid}/user/bookmarks/trellisfw/fsqa-audits/${audit}`,
-        fetchOptions
-      ).then((res) => {
-        if (res.status === 404) {
-          warn(`Failed to fetch audit ${audit}`);
-        }
-        return res.json();
-      });
+      vdoc = await tryFetch(conn, {
+        path: `/bookmarks/trellisfw/trading-partners/${pid}/user/bookmarks/trellisfw/fsqa-audits/${audit}`,
+      }).then((res) => res.data);
     } catch (e) {
       error('Failed to fetch audit: ${audit} %O', e);
       return;
@@ -276,18 +265,12 @@ async function getPartnerAudits(tradingPartners, pid) {
   });
 }
 
-async function getCoiShares(tradingPartners, cois, cid) {
+async function getCoiShares(conn, tradingPartners, cois, cid) {
   let vdoc;
   try {
-    vdoc = await tryFetch(
-      `${TRELLIS_URL}/bookmarks/trellisfw/cois/${cid}`,
-      fetchOptions
-    ).then((res) => {
-      if (res.status === 404) {
-        warn(`Failed to fetch coi ${cid}`);
-      }
-      return res.json();
-    });
+    vdoc = await tryFetch(conn, {
+      path: `/bookmarks/trellisfw/cois/${cid}`,
+    }).then((res) => res.data);
   } catch (e) {
     error(`Failed to get coi: ${cid} %O`, e);
     return;
@@ -305,24 +288,19 @@ async function getCoiShares(tradingPartners, cois, cid) {
     .forEach((pid) => {
       cois[cid].shares[pid] = {
         'trading partner name': tradingPartners[pid]['trading partner name'],
-        'trading partner id': tradingPartners[pid]['trading partner id'],
+        'trading partner masterid':
+          tradingPartners[pid]['trading partner masterid'],
       };
     });
   return;
 }
 
-async function getAuditShares(tradingPartners, audits, aid) {
+async function getAuditShares(conn, tradingPartners, audits, aid) {
   let vdoc;
   try {
-    vdoc = await tryFetch(
-      `${TRELLIS_URL}/bookmarks/trellisfw/fsqa-audits/${aid}`,
-      fetchOptions
-    ).then((res) => {
-      if (res.status === 404) {
-        warn(`Failed to fetch audit ${aid}`);
-      }
-      return res.json();
-    });
+    vdoc = await tryFetch(conn, {
+      path: `/bookmarks/trellisfw/fsqa-audits/${aid}`,
+    }).then((res) => res.data);
   } catch (e) {
     error(`Failed to get coi: ${aid} %O`, e);
     return;
@@ -340,33 +318,28 @@ async function getAuditShares(tradingPartners, audits, aid) {
     .forEach((pid) => {
       audits[aid].shares[pid] = {
         'trading partner name': tradingPartners[pid]['trading partner name'],
-        'trading partner id': tradingPartners[pid]['trading partner id'],
+        'trading partner masterid':
+          tradingPartners[pid]['trading partner masterid'],
       };
     });
   return;
 }
 
-async function getShares(_conn, queue, dates) {
+async function getShares(conn, queue, dates) {
   trace('Get Share History');
-  const trellisShares = await getTrellisShares({}, queue, dates);
+  const trellisShares = await getTrellisShares(conn, queue, dates);
   const emailShares = {}; // await getEmailShares();
   trace('trellis shares: %O', trellisShares);
   return { trellisShares: trellisShares.flat(), emailShares };
 }
 
-async function getTrellisShares(_conn, queue, dates) {
+async function getTrellisShares(conn, queue, dates) {
   let jobs;
   try {
     trace(`Getting ${queue} list`);
-    jobs = await tryFetch(
-      `${TRELLIS_URL}/bookmarks/services/trellis-shares/${queue}`,
-      fetchOptions
-    ).then((res) => {
-      if (res.status === 404) {
-        warn(`Failed to fetch job success day index list ${res.status}`);
-      }
-      return res.json();
-    });
+    jobs = await tryFetch(conn, {
+      path: `/bookmarks/services/trellis-shares/${queue}`,
+    }).then((res) => res.data);
   } catch (e) {
     error('failed to get trellis shares %O', e);
     return;
@@ -381,28 +354,22 @@ async function getTrellisShares(_conn, queue, dates) {
 
   switch (queue) {
     case 'jobs':
-      return getJobsFuture(_conn, jobs);
+      return getJobsFuture(conn, jobs);
     case 'jobs-success':
-      return getJobsSuccess(_conn, jobs, dates);
+      return getJobsSuccess(conn, jobs, dates);
   }
 }
 
-async function getJobsFuture(_conn, jobs) {
+async function getJobsFuture(conn, jobs) {
   return Promise.map(
     Object.keys(jobs),
     async (sid) => {
       trace(`Getting data for share id: ${sid}`);
       let share;
       try {
-        share = await tryFetch(
-          `${TRELLIS_URL}/bookmarks/services/trellis-shares/jobs/${sid}`,
-          fetchOptions
-        ).then((res) => {
-          if (res.status === 404) {
-            warn(`Failed to fetch share ${sid} ${res.status}`);
-          }
-          return res.json();
-        });
+        share = await tryFetch(conn, {
+          path: `${TRELLIS_URL}/bookmarks/services/trellis-shares/jobs/${sid}`,
+        }).then((res) => res.data);
       } catch (e) {
         error(`Failed to fetch share ${sid} %O', e`);
         return;
@@ -414,17 +381,9 @@ async function getJobsFuture(_conn, jobs) {
 
       let vdoc;
       try {
-        vdoc = await tryFetch(
-          `${TRELLIS_URL}${share.config.src}`,
-          fetchOptions
-        ).then((res) => {
-          if (res.status === 404) {
-            warn(
-              `Failed to fetch vdoc (${share.config.src}) in share ${sid} ${res.status}`
-            );
-          }
-          return res.json();
-        });
+        vdoc = await tryFetch(conn, {
+          path: share.config.src,
+        }).then((res) => res.data);
       } catch (e) {
         error(`Failed to fetch document shared in job ${sid} %O: %O`, share, e);
         return;
@@ -435,20 +394,9 @@ async function getJobsFuture(_conn, jobs) {
 
       let partner;
       try {
-        partner = await tryFetch(
-          `${TRELLIS_URL}${share.config.chroot
-            .split('/')
-            .slice(0, -2)
-            .join('/')}`,
-          fetchOptions
-        ).then((res) => {
-          if (res.status === 404) {
-            warn(
-              `Failed to fetch partner (${share.config.chroot}) in share ${sid} ${res.status}`
-            );
-          }
-          return res.json();
-        });
+        partner = await tryFetch(conn, {
+          path: share.config.chroot.split('/').slice(0, -2).join('/'),
+        }).then((res) => res.data);
       } catch (e) {
         error(`Failed to fetch partner in share job ${sid} %O', e`);
         return;
@@ -471,7 +419,7 @@ async function getJobsFuture(_conn, jobs) {
       }
 
       return {
-        'trading partner id': partner.masterid,
+        'trading partner masterid': partner.masterid,
         'trading partner name': partner.name,
         'recipient email address': partnerEmail,
         'event time': 'awaiting approval',
@@ -483,7 +431,7 @@ async function getJobsFuture(_conn, jobs) {
   );
 }
 
-async function getJobsSuccess(_conn, jobs, dates) {
+async function getJobsSuccess(conn, jobs, dates) {
   if (dates === undefined || dates.length === 0) {
     dates = [
       moment
@@ -508,15 +456,9 @@ async function getJobsSuccess(_conn, jobs, dates) {
       info(`Getting trellis shares for ${day}`);
       let shares;
       try {
-        shares = await tryFetch(
-          `${TRELLIS_URL}/bookmarks/services/trellis-shares/jobs-success/day-index/${day}`,
-          fetchOptions
-        ).then((res) => {
-          if (res.status === 404) {
-            warn(`Failed to fetch shares for ${day} ${res.status}`);
-          }
-          return res.json();
-        });
+        shares = await tryFetch(conn, {
+          path: `/bookmarks/services/trellis-shares/jobs-success/day-index/${day}`,
+        }).then((res) => res.data);
       } catch (e) {
         error(`Failed to get shares for day ${day} %O`, e);
         return;
@@ -531,7 +473,7 @@ async function getJobsSuccess(_conn, jobs, dates) {
       delete shares._type;
       delete shares._meta;
 
-      let completed = await getFinishedShares(shares, day);
+      let completed = await getFinishedShares(conn, shares, day);
       trace(`complete tasks for ${day} %O`, completed);
       // completed.concat(await getShareFail(shares));
       // completed.concat(await getEmailSuccess(shares));
@@ -542,19 +484,18 @@ async function getJobsSuccess(_conn, jobs, dates) {
   );
 }
 
-async function getFinishedShares(shares, day) {
+async function getFinishedShares(conn, shares, day) {
   return Promise.map(
     Object.keys(shares),
     async (sid) => {
       trace(`Getting data for share id: ${sid}`);
       let share;
       try {
-        share = await tryFetch(
-          `${TRELLIS_URL}/bookmarks/services/trellis-shares/jobs-success/day-index/${day}/${sid}`,
-          fetchOptions
-        ).then((res) => res.json());
+        share = await tryFetch(conn, {
+          path: `/bookmarks/services/trellis-shares/jobs-success/day-index/${day}/${sid}`,
+        }).then((res) => res.data);
       } catch (e) {
-        error(`Failed to fetch share ${sid} %O', e`);
+        error(`Failed to fetch share ${sid} %O`, e);
         return;
       }
       if (!share.hasOwnProperty('_id')) {
@@ -563,17 +504,9 @@ async function getFinishedShares(shares, day) {
 
       let vdoc;
       try {
-        vdoc = await tryFetch(
-          `${TRELLIS_URL}${share.config.src}`,
-          fetchOptions
-        ).then((res) => {
-          if (res.status === 404) {
-            warn(
-              `Failed to fetch vdoc (${share.config.src}) in share ${sid} ${res.status}`
-            );
-          }
-          return res.json();
-        });
+        vdoc = await tryFetch(conn, {
+          path: share.config.src,
+        }).then((res) => res.data);
       } catch (e) {
         error(`Failed to fetch document shared in job ${sid} %O: %O`, share, e);
         return;
@@ -584,20 +517,9 @@ async function getFinishedShares(shares, day) {
 
       let partner;
       try {
-        partner = await tryFetch(
-          `${TRELLIS_URL}${share.config.chroot
-            .split('/')
-            .slice(0, -2)
-            .join('/')}`,
-          fetchOptions
-        ).then((res) => {
-          if (res.status === 404) {
-            warn(
-              `Failed to fetch partner (${share.config.chroot}) in share ${sid} ${res.status}`
-            );
-          }
-          return res.json();
-        });
+        partner = await tryFetch(conn, {
+          path: share.config.chroot.split('/').slice(0, -2).join('/'),
+        }).then((res) => res.data);
       } catch (e) {
         error(`Failed to fetch partner in share job ${sid} %O', e`);
         return;
@@ -620,7 +542,7 @@ async function getFinishedShares(shares, day) {
       }
 
       return {
-        'trading partner id': partner.masterid,
+        'trading partner masterid': partner.masterid,
         'trading partner name': partner.name,
         'recipient email address': partnerEmail,
         'event time': moment(
@@ -703,7 +625,7 @@ async function createDocumentShares(data) {
         'document name': doc['document name'],
         'document id': doc['document id'],
         'document type': doc['document type'],
-        'trading partner id': '',
+        'trading partner masterid': '',
         'trading partner name': '',
         'upload date': doc['upload date'],
         'coi holder': doc['coi holder'],
@@ -721,7 +643,8 @@ async function createDocumentShares(data) {
           docs.push({
             ...d,
             'trading partner name': doc.shares[pid]['trading partner name'],
-            'trading partner id': doc.shares[pid]['trading partner id'],
+            'trading partner masterid':
+              doc.shares[pid]['trading partner masterid'],
           });
         });
       }
@@ -735,7 +658,7 @@ async function createDocumentShares(data) {
       'document id',
       'document type',
       'trading partner name',
-      'trading partner id',
+      'trading partner masterid',
       'upload date',
       'coi holder',
       'coi producer',
@@ -767,7 +690,8 @@ function createUserAccess(tradingPartners) {
   Object.keys(tradingPartners).forEach((pid) => {
     const props = {
       'trading partner name': tradingPartners[pid]['trading partner name'],
-      'trading partner id': tradingPartners[pid]['trading partner id'],
+      'trading partner masterid':
+        tradingPartners[pid]['trading partner masterid'],
     };
     const docs = Object.keys(tradingPartners[pid].documents);
     if (docs.length === 0) {
@@ -783,7 +707,7 @@ function createUserAccess(tradingPartners) {
   trace('Generating user access report');
   const ws = XLSX.utils.json_to_sheet(users, {
     Headers: [
-      'trading partner id',
+      'trading partner masterid',
       'trading partner name',
       'document type',
       'document id',
@@ -823,31 +747,12 @@ function createEventLog(data) {
         'audit organization name',
         'audit expiration date',
         'audit score',
-        'trading partner id',
+        'trading partner masterid',
         'trading partner name',
         'recipient email address',
         'event time',
         'event type',
       ],
-      // Headers: [
-      //   'document type',
-      //   'share status',
-      //   'document filename',
-      //   'coi holder name',
-      //   'coi producer name',
-      //   'coi insured name',
-      //   'upload date',
-      //   'coi expiration date',
-      //   'audit organization name',
-      //   'audit expiration date',
-      //   'audit score',
-      //   'trading partner name',
-      //   'trading partner masterid',
-      //   'email address',
-      //   'trellisid',
-      //   'event time',
-      //   'event type',
-      // ],
     }
   );
   const wb = XLSX.utils.book_new();
@@ -886,18 +791,19 @@ function createSheets(shares, events) {
 }
 */
 
-async function tryFetch(url, opt) {
+async function tryFetch(conn, opt) {
   for (let i = 0; i < 5; i++) {
     try {
-      return await fetch(url, opt);
+      return await conn.get(opt);
     } catch (e) {
-      if (!(e.code === 'ECONNRESET')) {
+      // TODO may not need this while using @oada/client
+      if (e.status === 404) {
+        trace(`Document not found: ${opt.path}`);
         throw e;
       } else {
-        trace(`${url} Connection reset, retrying...`);
+        trace('%O', e);
+        trace(`${opt.path} Connection reset, retrying...`);
       }
     }
   }
 }
-
-
