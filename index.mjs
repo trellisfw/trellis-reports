@@ -17,11 +17,6 @@ const error = debug('report-gen:error');
 // These can be overrided with -d and/or -t on command line
 let TRELLIS_URL = `https://${config.get('domain')}`;
 let TRELLIS_TOKEN = config.get('token');
-// let fetchOptions = {
-//   headers: {
-//     Authorization: `Bearer ${TRELLIS_TOKEN}`, // resets below if command-line -t
-//   },
-// };
 
 (async () => {
   let program = new commander.Command();
@@ -248,8 +243,8 @@ async function getPartnerCois(conn, tradingPartners, pid) {
       return;
     }
 
-    if (tradingPartners[pid].documents[coi] === undefined) {
-      tradingPartners[pid].documents[coi] = getCoiDetails(vdoc);
+    if (tradingPartners[pid].documents[vdoc._id] === undefined) {
+      tradingPartners[pid].documents[vdoc._id] = getCoiDetails(vdoc);
     }
   });
 }
@@ -288,8 +283,8 @@ async function getPartnerAudits(conn, tradingPartners, pid) {
       return;
     }
 
-    if (tradingPartners[pid].documents[audit] === undefined) {
-      tradingPartners[pid].documents[audit] = getAuditDetails(vdoc);
+    if (tradingPartners[pid].documents[vdoc._id] === undefined) {
+      tradingPartners[pid].documents[vdoc._id] = getAuditDetails(vdoc);
     }
   });
 }
@@ -311,16 +306,18 @@ async function getCoiShares(conn, tradingPartners, cois, cid) {
 
   cois[cid] = { ...getCoiDetails(vdoc), shares: {} };
   Object.keys(tradingPartners)
-    .filter((pid) => {
-      tradingPartners[pid].documents.hasOwnProperty(cid);
-    })
+    // .filter((pid) => {
+    //   tradingPartners[pid].documents.hasOwnProperty(vdoc._id);
+    // })
     .forEach((pid) => {
-      trace(`coi ${cid} shared with ${pid}`);
-      cois[cid].shares[pid] = {
-        'trading partner name': tradingPartners[pid]['trading partner name'],
-        'trading partner masterid':
-          tradingPartners[pid]['trading partner masterid'],
-      };
+      if (tradingPartners[pid].documents[vdoc._id] !== undefined) {
+        trace(`coi ${cid} shared with ${pid}`);
+        cois[cid].shares[pid] = {
+          'trading partner name': tradingPartners[pid]['trading partner name'],
+          'trading partner masterid':
+            tradingPartners[pid]['trading partner masterid'],
+        };
+      }
     });
   return;
 }
@@ -343,9 +340,10 @@ async function getAuditShares(conn, tradingPartners, audits, aid) {
   audits[aid] = { ...getAuditDetails(vdoc), shares: {} };
   Object.keys(tradingPartners)
     .filter((pid) => {
-      tradingPartners[pid].documents.hasOwnProperty(aid);
+      tradingPartners[pid].documents.hasOwnProperty(vdoc._id);
     })
     .forEach((pid) => {
+      trace(`Audit ${aid} shared with ${pid}`);
       audits[aid].shares[pid] = {
         'trading partner name': tradingPartners[pid]['trading partner name'],
         'trading partner masterid':
@@ -648,33 +646,42 @@ function getAuditDetails(vdoc) {
 function createDocumentShares(data) {
   let docs = [];
   Object.values(data)
-    // .filter((doc) => doc.hasOwnProperty('shares'))
+    // .filter((doc) => Object.keys(doc).length > 0)
     .forEach((doc) => {
       const pids = Object.keys(doc.shares);
-      const d = {
-        'document name': doc['document name'],
-        'document id': doc['document id'],
-        'document type': doc['document type'],
-        'trading partner masterid': '',
-        'trading partner name': '',
-        'upload date': doc['upload date'],
-        'coi holder': doc['coi holder'],
-        'coi producer': doc['coi producer'],
-        'coi insured': doc['coi insured'],
-        'coi expiration date': doc['coi expiration date'],
-        'audit organization': doc['audit organization'],
-        'audit expiration date': doc['audit expiration date'],
-        'audit score': doc['audit score'],
-      };
       if (pids.length === 0) {
-        docs.push({ ...d });
+        docs.push({
+          'document name': doc['document name'],
+          'document id': doc['document id'],
+          'document type': doc['document type'],
+          'upload date': doc['upload date'],
+          'trading partner name': '',
+          'trading partner masterid': '',
+          'coi holder': doc['coi holder'],
+          'coi producer': doc['coi producer'],
+          'coi insured': doc['coi insured'],
+          'coi expiration date': doc['coi expiration date'],
+          'audit organization': doc['audit organization'],
+          'audit expiration date': doc['audit expiration date'],
+          'audit score': doc['audit score'],
+        });
       } else {
         pids.forEach((pid) => {
           docs.push({
-            ...d,
+            'document name': doc['document name'],
+            'document id': doc['document id'],
+            'document type': doc['document type'],
+            'upload date': doc['upload date'],
             'trading partner name': doc.shares[pid]['trading partner name'],
             'trading partner masterid':
               doc.shares[pid]['trading partner masterid'],
+            'coi holder': doc['coi holder'],
+            'coi producer': doc['coi producer'],
+            'coi insured': doc['coi insured'],
+            'coi expiration date': doc['coi expiration date'],
+            'audit organization': doc['audit organization'],
+            'audit expiration date': doc['audit expiration date'],
+            'audit score': doc['audit score'],
           });
         });
       }
