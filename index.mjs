@@ -1,12 +1,13 @@
 import debug from 'debug';
 // import { JobQueue } from '@oada/oada-jobs';
-// import fetch from 'node-fetch';
+import fetch from 'node-fetch';
 import XLSX from 'xlsx';
 import Promise from 'bluebird';
 import config from './config.js';
 import moment from 'moment';
 import commander from 'commander';
 import client from '@oada/client';
+import fs from 'fs';
 
 const info = debug('report-gen:info');
 const trace = debug('report-gen:trace');
@@ -28,7 +29,11 @@ let TRELLIS_TOKEN = config.get('token');
     .option('-q, --queue <queue>', '`jobs` or `jobs-success`', 'jobs-success')
     .option('-s, --state <state>', 'only generate a jobs report', 'true')
     .option('-d --domain <domain>', 'domain without https', 'localhost')
-    .option('-t --token <token>', 'token', 'god');
+    .option('-t --token <token>', 'token', 'god')
+    .option(
+      '-f, --file <file>',
+      'location to save reports, if none specified will upload to <domain>'
+    );
   program.parse(process.argv);
 
   if (program.domain) {
@@ -61,16 +66,36 @@ let TRELLIS_TOKEN = config.get('token');
     return;
   }
 
+  let userAccess;
+  let documentShares;
   if (program.state.toLowerCase() === 'true') {
     // console.log(program.state);
+    trace('Getting share state');
     const shares = await getState(conn);
-    createUserAccess(shares.tradingPartners);
-    createDocumentShares(shares.documents);
+    userAccess = createUserAccess(shares.tradingPartners);
+    documentShares = createDocumentShares(shares.documents);
   }
 
   trace(`Starting getShares`);
   let jobs = await getShares(conn, program.queue);
-  createEventLog(jobs);
+  const eventLog = createEventLog(jobs);
+  if (program.file) {
+    await saveReports(
+      userAccess,
+      documentShares,
+      eventLog,
+      // program.queue,
+      program.file
+    );
+  } else {
+    await uploadReports(
+      conn,
+      userAccess,
+      documentShares,
+      eventLog,
+      program.queue
+    );
+  }
 })();
 
 async function getState(conn) {
@@ -78,7 +103,7 @@ async function getState(conn) {
   trace('Getting trading partner list');
   let tradingPartners;
   try {
-    tradingPartners = await tryFetch(conn, {
+    tradingPartners = await tryFetchGet(conn, {
       path: '/bookmarks/trellisfw/trading-partners',
     }).then((res) => res.data);
   } catch (e) {
@@ -103,11 +128,15 @@ async function getState(conn) {
       info(`Getting documents for trading partner ${pid}`);
       let partner;
       try {
-        partner = await tryFetch(conn, {
+        partner = await tryFetchGet(conn, {
           path: `/bookmarks/trellisfw/trading-partners/${pid}`,
         }).then((res) => res.data);
       } catch (e) {
-        error(`Failed to get trading partner ${pid} %O`, e);
+        if (e.status === 404) {
+          info(`Trading partner ${pid} has no documents`);
+        } else {
+          error(`Failed to get trading partner ${pid} %O`, e);
+        }
         return;
       }
 
@@ -131,7 +160,7 @@ async function getState(conn) {
   trace('Getting COI list');
   let cois;
   try {
-    cois = await tryFetch(conn, {
+    cois = await tryFetchGet(conn, {
       path: `/bookmarks/trellisfw/cois`,
     }).then((res) => res.data);
   } catch (e) {
@@ -161,7 +190,7 @@ async function getState(conn) {
   trace('Getting Audit Shares');
   let audits;
   try {
-    audits = await tryFetch(conn, {
+    audits = await tryFetchGet(conn, {
       path: `/bookmarks/trellisfw/fsqa-audits`,
     }).then((res) => res.data);
   } catch (e) {
@@ -187,7 +216,7 @@ async function getState(conn) {
 async function getPartnerCois(conn, tradingPartners, pid) {
   let cois;
   try {
-    cois = await tryFetch(conn, {
+    cois = await tryFetchGet(conn, {
       path: `/bookmarks/trellisfw/trading-partners/${pid}/user/bookmarks/trellisfw/cois`,
     }).then((res) => res.data);
   } catch (e) {
@@ -207,7 +236,7 @@ async function getPartnerCois(conn, tradingPartners, pid) {
     trace(`Getting coi ${coi}`);
     let vdoc;
     try {
-      vdoc = await tryFetch(conn, {
+      vdoc = await tryFetchGet(conn, {
         path: `/bookmarks/trellisfw/trading-partners/${pid}/user/bookmarks/trellisfw/cois/${coi}`,
       }).then((res) => res.data);
     } catch (e) {
@@ -228,7 +257,7 @@ async function getPartnerCois(conn, tradingPartners, pid) {
 async function getPartnerAudits(conn, tradingPartners, pid) {
   let audits;
   try {
-    audits = await tryFetch(conn, {
+    audits = await tryFetchGet(conn, {
       path: `/bookmarks/trellisfw/trading-partners/${pid}/user/bookmarks/trellisfw/fsqa-audits`,
     }).then((res) => res.data);
   } catch (e) {
@@ -247,7 +276,7 @@ async function getPartnerAudits(conn, tradingPartners, pid) {
   Promise.each(Object.keys(audits), async (audit) => {
     let vdoc;
     try {
-      vdoc = await tryFetch(conn, {
+      vdoc = await tryFetchGet(conn, {
         path: `/bookmarks/trellisfw/trading-partners/${pid}/user/bookmarks/trellisfw/fsqa-audits/${audit}`,
       }).then((res) => res.data);
     } catch (e) {
@@ -268,7 +297,7 @@ async function getPartnerAudits(conn, tradingPartners, pid) {
 async function getCoiShares(conn, tradingPartners, cois, cid) {
   let vdoc;
   try {
-    vdoc = await tryFetch(conn, {
+    vdoc = await tryFetchGet(conn, {
       path: `/bookmarks/trellisfw/cois/${cid}`,
     }).then((res) => res.data);
   } catch (e) {
@@ -283,9 +312,10 @@ async function getCoiShares(conn, tradingPartners, cois, cid) {
   cois[cid] = { ...getCoiDetails(vdoc), shares: {} };
   Object.keys(tradingPartners)
     .filter((pid) => {
-      tradingPartners[pid].hasOwnProperty(cid);
+      tradingPartners[pid].documents.hasOwnProperty(cid);
     })
     .forEach((pid) => {
+      trace(`coi ${cid} shared with ${pid}`);
       cois[cid].shares[pid] = {
         'trading partner name': tradingPartners[pid]['trading partner name'],
         'trading partner masterid':
@@ -298,7 +328,7 @@ async function getCoiShares(conn, tradingPartners, cois, cid) {
 async function getAuditShares(conn, tradingPartners, audits, aid) {
   let vdoc;
   try {
-    vdoc = await tryFetch(conn, {
+    vdoc = await tryFetchGet(conn, {
       path: `/bookmarks/trellisfw/fsqa-audits/${aid}`,
     }).then((res) => res.data);
   } catch (e) {
@@ -313,7 +343,7 @@ async function getAuditShares(conn, tradingPartners, audits, aid) {
   audits[aid] = { ...getAuditDetails(vdoc), shares: {} };
   Object.keys(tradingPartners)
     .filter((pid) => {
-      tradingPartners[pid].hasOwnProperty(aid);
+      tradingPartners[pid].documents.hasOwnProperty(aid);
     })
     .forEach((pid) => {
       audits[aid].shares[pid] = {
@@ -337,7 +367,7 @@ async function getTrellisShares(conn, queue, dates) {
   let jobs;
   try {
     trace(`Getting ${queue} list`);
-    jobs = await tryFetch(conn, {
+    jobs = await tryFetchGet(conn, {
       path: `/bookmarks/services/trellis-shares/${queue}`,
     }).then((res) => res.data);
   } catch (e) {
@@ -367,7 +397,7 @@ async function getJobsFuture(conn, jobs) {
       trace(`Getting data for share id: ${sid}`);
       let share;
       try {
-        share = await tryFetch(conn, {
+        share = await tryFetchGet(conn, {
           path: `${TRELLIS_URL}/bookmarks/services/trellis-shares/jobs/${sid}`,
         }).then((res) => res.data);
       } catch (e) {
@@ -381,7 +411,7 @@ async function getJobsFuture(conn, jobs) {
 
       let vdoc;
       try {
-        vdoc = await tryFetch(conn, {
+        vdoc = await tryFetchGet(conn, {
           path: share.config.src,
         }).then((res) => res.data);
       } catch (e) {
@@ -394,7 +424,7 @@ async function getJobsFuture(conn, jobs) {
 
       let partner;
       try {
-        partner = await tryFetch(conn, {
+        partner = await tryFetchGet(conn, {
           path: share.config.chroot.split('/').slice(0, -2).join('/'),
         }).then((res) => res.data);
       } catch (e) {
@@ -456,7 +486,7 @@ async function getJobsSuccess(conn, jobs, dates) {
       info(`Getting trellis shares for ${day}`);
       let shares;
       try {
-        shares = await tryFetch(conn, {
+        shares = await tryFetchGet(conn, {
           path: `/bookmarks/services/trellis-shares/jobs-success/day-index/${day}`,
         }).then((res) => res.data);
       } catch (e) {
@@ -491,7 +521,7 @@ async function getFinishedShares(conn, shares, day) {
       trace(`Getting data for share id: ${sid}`);
       let share;
       try {
-        share = await tryFetch(conn, {
+        share = await tryFetchGet(conn, {
           path: `/bookmarks/services/trellis-shares/jobs-success/day-index/${day}/${sid}`,
         }).then((res) => res.data);
       } catch (e) {
@@ -504,7 +534,7 @@ async function getFinishedShares(conn, shares, day) {
 
       let vdoc;
       try {
-        vdoc = await tryFetch(conn, {
+        vdoc = await tryFetchGet(conn, {
           path: share.config.src,
         }).then((res) => res.data);
       } catch (e) {
@@ -517,7 +547,7 @@ async function getFinishedShares(conn, shares, day) {
 
       let partner;
       try {
-        partner = await tryFetch(conn, {
+        partner = await tryFetchGet(conn, {
           path: share.config.chroot.split('/').slice(0, -2).join('/'),
         }).then((res) => res.data);
       } catch (e) {
@@ -615,10 +645,10 @@ function getAuditDetails(vdoc) {
 // to them
 //
 // build map in memory while construction "user access"
-async function createDocumentShares(data) {
+function createDocumentShares(data) {
   let docs = [];
   Object.values(data)
-    .filter((doc) => doc.hasOwnProperty('shares'))
+    // .filter((doc) => doc.hasOwnProperty('shares'))
     .forEach((doc) => {
       const pids = Object.keys(doc.shares);
       const d = {
@@ -671,9 +701,13 @@ async function createDocumentShares(data) {
   });
   const wb = XLSX.utils.book_new();
   XLSX.utils.book_append_sheet(wb, ws);
-  XLSX.writeFile(wb, `${moment().format('YYYY-MM-DD')}_document_shares.xlsx`);
-  trace('Document share report written');
-  return;
+  return XLSX.write(wb, {
+    type: 'buffer',
+    bookType: 'xlsx',
+    Props: {
+      Title: `${moment().format('YYYY-MM-DD')}_document_shares.xlsx`,
+    },
+  });
 }
 
 // XXX Ensure all trading partners are listed even if they don't have access
@@ -724,8 +758,14 @@ function createUserAccess(tradingPartners) {
   });
   const wb = XLSX.utils.book_new();
   XLSX.utils.book_append_sheet(wb, ws);
-  XLSX.writeFile(wb, `${moment().format('YYYY-MM-DD')}_user_access.xlsx`);
-  trace('User access report written');
+  return XLSX.write(wb, {
+    type: 'buffer',
+    bookType: 'xlsx',
+    Props: {
+      Title: `${moment().format('YYYY-MM-DD')}_user_access.xlsx`,
+    },
+  });
+  // trace('User access report written');
   return;
 }
 
@@ -757,41 +797,146 @@ function createEventLog(data) {
   );
   const wb = XLSX.utils.book_new();
   XLSX.utils.book_append_sheet(wb, ws);
-  XLSX.writeFile(wb, `${moment().format('YYYY-MM-DD')}_event_log.xlsx`);
-  trace('Event log report written');
-  return;
+  return XLSX.write(wb, {
+    type: 'buffer',
+    bookType: 'xlsx',
+    Props: {
+      Title: `${moment().format('YYYY-MM-DD')}_event_log.xlsx`,
+    },
+  });
 }
 
-/*
-function createSheets(shares, events) {
-  const date = moment().format('YYYY-MM-DD');
-  info('Creating document share report');
-  let docShares = XLSX.utils.book_new();
-  XLSX.utils.book_append_sheet(
-    docShares,
-    createDocumentShares(shares.documents)
-  );
-  XLSX.writeFile(docShares, `${date}_document_shares.xlsx`);
-  info('Document share report written');
- 
-  // info('Creating user access report');
-  // let userAccess = XLSX.utils.book_new();
-  // XLSX.utils.book_append_sheet(
-  //   userAccess,
-  //   createUserAccess(shares.tradingPartners)
-  // );
-  // XLSX.writeFile(userAccess, `${date}_user_access.xlsx`);
-  // info('User access report written');
- 
-  // info('Creating event log report');
-  // let eventLog = XLSX.utils.book_new();
-  // XLSX.utils.book_append_sheet(eventLog, createEventLog(events));
-  // XLSX.writeFile(eventLog, `${date}_event_log.xlsx`);
-  // info('Event log written');
-}
-*/
+async function saveReports(
+  userAccess,
+  documentShares,
+  eventLog,
+  // queue,
+  filename
+) {
+  if (userAccess !== undefined) {
+    trace('Writng User Access Report');
+    fs.writeFile(`${filename}_user_access.xlsx`, userAccess, (err) => {
+      if (err) {
+        error('Failed to write User Access Report %O', err);
+      } else {
+        info('User Access Report Written');
+      }
+    });
+  }
 
-async function tryFetch(conn, opt) {
+  if (documentShares !== undefined) {
+    trace('Writng Document Share Report');
+    fs.writeFile(`${filename}_document_shares.xlsx`, documentShares, (err) => {
+      if (err) {
+        error('Failed to write Document Share Report %O', err);
+      } else {
+        info('Document Share Report Written');
+      }
+    });
+  }
+
+  if (eventLog !== undefined) {
+    trace('Writing Event Log Report');
+    fs.writeFile(`${filename}_event_log.xlsx`, eventLog, (err) => {
+      if (err) {
+        error('Failed to write Event Log Report %O', err);
+      } else {
+        info('Event Log Report Written');
+      }
+    });
+  }
+}
+
+async function uploadReports(
+  conn,
+  eventLog,
+  userAccess,
+  documentShares,
+  queue
+) {
+  const today = moment().format('YYYY-MM-DD');
+  let reports = {};
+
+  if (userAccess) {
+    let userAccessLoc;
+    try {
+      userAccessLoc = await fetch(`${TRELLIS_URL}/resources`, {
+        method: 'POST',
+        headers: {
+          Authorization: `Bearer ${TRELLIS_TOKEN}`,
+        },
+        body: userAccess,
+      }).then((res) => res.headers.get('content-location').substr(1));
+      reports['current-tradingpartnershares'] = {
+        _id: userAccessLoc,
+      };
+    } catch (e) {
+      error('Failed to upload user access report %O', e);
+    }
+  }
+
+  if (documentShares) {
+    let documentSharesLoc;
+    try {
+      documentSharesLoc = await fetch(`${TRELLIS_URL}/resources`, {
+        method: 'POST',
+        headers: {
+          Authorization: `Bearer ${TRELLIS_TOKEN}`,
+        },
+        body: documentShares,
+      }).then((res) => res.headers.get('content-location').substr(1));
+      reports['current-shareabledocs'] = {
+        _id: documentSharesLoc,
+      };
+    } catch (e) {
+      error('Failed to upload user access report %O', e);
+    }
+  }
+
+  let eventLogLoc;
+  try {
+    eventLogLoc = await fetch(`${TRELLIS_URL}/resources`, {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${TRELLIS_TOKEN}`,
+      },
+      body: eventLog,
+    }).then((res) => res.headers.get('content-location').substr(1));
+    reports['event-log'] = {
+      _id: eventLogLoc,
+    };
+  } catch (e) {
+    error('Failed to upload user access report %O', e);
+  }
+
+  let dayReportsLoc;
+  try {
+    dayReportsLoc = await conn
+      .post({
+        path: '/resources',
+        data: reports,
+      })
+      .then((res) => res.headers['content-location'].substr(1));
+  } catch (e) {
+    error('Failed to post reports %O', e);
+  }
+
+  try {
+    // TODO make something similar to tryFetchGet
+    await conn.put({
+      path: '/bookmarks/services/trellis-reports/reports/day-index',
+      data: {
+        [today]: {
+          _id: dayReportsLoc,
+        },
+      },
+    });
+  } catch (e) {
+    error('Failed to link report locations %O', e);
+  }
+}
+
+async function tryFetchGet(conn, opt) {
   for (let i = 0; i < 5; i++) {
     try {
       return await conn.get(opt);
