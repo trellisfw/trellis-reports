@@ -645,18 +645,34 @@ function getAuditDetails(vdoc) {
 // build map in memory while construction "user access"
 function createDocumentShares(data) {
   let docs = [];
-  Object.values(data)
-    // .filter((doc) => Object.keys(doc).length > 0)
-    .forEach((doc) => {
-      const pids = Object.keys(doc.shares);
-      if (pids.length === 0) {
+  Object.values(data).forEach((doc) => {
+    const pids = Object.keys(doc.shares);
+    if (pids.length === 0) {
+      docs.push({
+        'document name': doc['document name'],
+        'document id': doc['document id'],
+        'document type': doc['document type'],
+        'upload date': doc['upload date'],
+        'trading partner name': '',
+        'trading partner masterid': '',
+        'coi holder': doc['coi holder'],
+        'coi producer': doc['coi producer'],
+        'coi insured': doc['coi insured'],
+        'coi expiration date': doc['coi expiration date'],
+        'audit organization': doc['audit organization'],
+        'audit expiration date': doc['audit expiration date'],
+        'audit score': doc['audit score'],
+      });
+    } else {
+      pids.forEach((pid) => {
         docs.push({
           'document name': doc['document name'],
           'document id': doc['document id'],
           'document type': doc['document type'],
           'upload date': doc['upload date'],
-          'trading partner name': '',
-          'trading partner masterid': '',
+          'trading partner name': doc.shares[pid]['trading partner name'],
+          'trading partner masterid':
+            doc.shares[pid]['trading partner masterid'],
           'coi holder': doc['coi holder'],
           'coi producer': doc['coi producer'],
           'coi insured': doc['coi insured'],
@@ -665,27 +681,9 @@ function createDocumentShares(data) {
           'audit expiration date': doc['audit expiration date'],
           'audit score': doc['audit score'],
         });
-      } else {
-        pids.forEach((pid) => {
-          docs.push({
-            'document name': doc['document name'],
-            'document id': doc['document id'],
-            'document type': doc['document type'],
-            'upload date': doc['upload date'],
-            'trading partner name': doc.shares[pid]['trading partner name'],
-            'trading partner masterid':
-              doc.shares[pid]['trading partner masterid'],
-            'coi holder': doc['coi holder'],
-            'coi producer': doc['coi producer'],
-            'coi insured': doc['coi insured'],
-            'coi expiration date': doc['coi expiration date'],
-            'audit organization': doc['audit organization'],
-            'audit expiration date': doc['audit expiration date'],
-            'audit score': doc['audit score'],
-          });
-        });
-      }
-    });
+      });
+    }
+  });
 
   trace('document shares: %O', docs);
   trace('Generating document share report');
@@ -865,65 +863,90 @@ async function uploadReports(
   let reports = {};
 
   if (userAccess) {
-    let userAccessLoc;
     try {
-      userAccessLoc = await fetch(`${TRELLIS_URL}/resources`, {
+      const res = await fetch(`${TRELLIS_URL}/resources`, {
         method: 'POST',
         headers: {
           Authorization: `Bearer ${TRELLIS_TOKEN}`,
+          'Content-Type':
+            'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
         },
         body: userAccess,
-      }).then((res) => res.headers.get('content-location').substr(1));
-      reports['current-tradingpartnershares'] = {
-        _id: userAccessLoc,
-      };
+      });
+      if (res.ok) {
+        const loc = res.headers.get('content-location').substr(1);
+        trace(`user access report uploaded to ${loc}`);
+        reports['current-tradingpartnershares'] = {
+          _id: loc,
+        };
+      } else {
+        error('failed to post user access report');
+      }
     } catch (e) {
       error('Failed to upload user access report %O', e);
     }
   }
 
   if (documentShares) {
-    let documentSharesLoc;
     try {
-      documentSharesLoc = await fetch(`${TRELLIS_URL}/resources`, {
+      const res = await fetch(`${TRELLIS_URL}/resources`, {
         method: 'POST',
         headers: {
           Authorization: `Bearer ${TRELLIS_TOKEN}`,
+          'Content-Type':
+            'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
         },
         body: documentShares,
-      }).then((res) => res.headers.get('content-location').substr(1));
-      reports['current-shareabledocs'] = {
-        _id: documentSharesLoc,
-      };
+      });
+      if (res.ok) {
+        const loc = res.headers.get('content-location').substr(1);
+        trace(`document share report uploaded to ${loc}`);
+        reports['current-shareabledocs'] = {
+          _id: loc,
+        };
+      } else {
+        error('failed to post document share report');
+      }
     } catch (e) {
-      error('Failed to upload user access report %O', e);
+      error('Failed to upload document share report %O', e);
     }
   }
 
-  let eventLogLoc;
   try {
-    eventLogLoc = await fetch(`${TRELLIS_URL}/resources`, {
+    const res = await fetch(`${TRELLIS_URL}/resources`, {
       method: 'POST',
       headers: {
         Authorization: `Bearer ${TRELLIS_TOKEN}`,
+        'Content-Type':
+          'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
       },
       body: eventLog,
-    }).then((res) => res.headers.get('content-location').substr(1));
-    reports['event-log'] = {
-      _id: eventLogLoc,
-    };
+    });
+    if (res.ok) {
+      const loc = res.headers.get('content-location').substr(1);
+      trace(`event log report uploaded to ${loc}`);
+      reports['event-log'] = {
+        _id: loc,
+      };
+    } else {
+      error('Failed to post event log');
+    }
   } catch (e) {
-    error('Failed to upload user access report %O', e);
+    error('Failed to upload event log report %O', e);
   }
 
   let dayReportsLoc;
   try {
-    dayReportsLoc = await conn
-      .post({
-        path: '/resources',
-        data: reports,
-      })
-      .then((res) => res.headers['content-location'].substr(1));
+    const res = await conn.post({
+      path: '/resources',
+      data: reports,
+    });
+    if (res.headers.hasOwnProperty('content-location')) {
+      dayReportsLoc = res.headers['content-location'].substr(1);
+      trace(`day index posted to ${dayReportsLoc}`);
+    } else {
+      error('day report: no content location provided');
+    }
   } catch (e) {
     error('Failed to post reports %O', e);
   }
