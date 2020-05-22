@@ -746,8 +746,8 @@ function createUserAccess(tradingPartners) {
   trace('Generating user access report');
   const ws = XLSX.utils.json_to_sheet(users, {
     Headers: [
-      'trading partner masterid',
       'trading partner name',
+      'trading partner masterid',
       'document type',
       'document id',
       'document name',
