@@ -85,9 +85,9 @@ let TRELLIS_TOKEN = config.get('token');
   } else {
     await uploadReports(
       conn,
+      eventLog,
       userAccess,
       documentShares,
-      eventLog,
       program.queue
     );
   }
