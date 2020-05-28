@@ -366,29 +366,68 @@ async function getShares(conn, queue, dates) {
 }
 
 async function getTrellisShares(conn, queue, dates) {
-  let jobs;
-  try {
-    trace(`Getting ${queue} list`);
-    jobs = await tryFetchGet(conn, {
-      path: `/bookmarks/services/trellis-shares/${queue}`,
-    }).then((res) => res.data);
-  } catch (e) {
-    error('failed to get trellis shares %O', e);
-    return;
-  }
-  if (!jobs.hasOwnProperty('_id')) {
-    return;
-  }
-  delete jobs._id;
-  delete jobs._meta;
-  delete jobs._rev;
-  delete jobs._type;
-
   switch (queue) {
-    case 'jobs':
-      return getJobsFuture(conn, jobs);
-    case 'jobs-success':
-      return getJobsSuccess(conn, jobs, dates);
+    case 'waiting':
+      let waiting;
+      try {
+        trace(`Getting ${queue} list`);
+        waiting = await tryFetchGet(conn, {
+          path: `/bookmarks/services/trellis-shares/jobs`,
+        }).then((res) => res.data);
+      } catch (e) {
+        error('failed to get trellis shares %O', e);
+        return;
+      }
+      if (!waiting.hasOwnProperty('_id')) {
+        return;
+      }
+      delete waiting._id;
+      delete waiting._meta;
+      delete waiting._rev;
+      delete waiting._type;
+
+      return getJobsFuture(conn, waiting);
+
+    case 'complete':
+      let jobSuccess;
+      try {
+        trace(`Getting ${queue} list`);
+        jobSuccess = await tryFetchGet(conn, {
+          path: `/bookmarks/services/trellis-shares/jobs-success`,
+        }).then((res) => res.data);
+      } catch (e) {
+        error('failed to get trellis shares %O', e);
+        return;
+      }
+      if (!jobSuccess.hasOwnProperty('_id')) {
+        return;
+      }
+      delete jobSuccess._id;
+      delete jobSuccess._meta;
+      delete jobSuccess._rev;
+      delete jobSuccess._type;
+
+      let jobFailure;
+      try {
+        trace(`Getting ${queue} list`);
+        jobFailure = await tryFetchGet(conn, {
+          path: `/bookmarks/services/trellis-shares/jobs-failure`,
+        }).then((res) => res.data);
+      } catch (e) {
+        error('failed to get trellis shares %O', e);
+        return;
+      }
+      if (!jobFailure.hasOwnProperty('_id')) {
+        return;
+      }
+      delete jobFailure._id;
+      delete jobFailure._meta;
+      delete jobFailure._rev;
+      delete jobFailure._type;
+
+      let complete = { ...jobSuccess, ...jobFailure };
+
+      return getFinishedJobs(conn, complete, dates);
   }
 }
 
@@ -463,7 +502,7 @@ async function getJobsFuture(conn, jobs) {
   );
 }
 
-async function getJobsSuccess(conn, jobs, dates) {
+async function getFinishedJobs(conn, jobs, dates) {
   if (dates === undefined || dates.length === 0) {
     dates = [
       moment
@@ -486,9 +525,9 @@ async function getJobsSuccess(conn, jobs, dates) {
       }),
     async (day) => {
       info(`Getting trellis shares for ${day}`);
-      let shares;
+      let success;
       try {
-        shares = await tryFetchGet(conn, {
+        success = await tryFetchGet(conn, {
           path: `/bookmarks/services/trellis-shares/jobs-success/day-index/${day}`,
         }).then((res) => res.data);
       } catch (e) {
@@ -496,16 +535,38 @@ async function getJobsSuccess(conn, jobs, dates) {
         return;
       }
 
-      if (!shares.hasOwnProperty('_id')) {
+      if (!success.hasOwnProperty('_id')) {
         return;
       }
 
-      delete shares._id;
-      delete shares._rev;
-      delete shares._type;
-      delete shares._meta;
+      delete success._id;
+      delete success._rev;
+      delete success._type;
+      delete success._meta;
 
-      let completed = await getFinishedShares(conn, shares, day);
+      let failure;
+      try {
+        failure = await tryFetchGet(conn, {
+          path: `/bookmarks/services/trellis-shares/jobs-failure/day-index/${day}`,
+        }).then((res) => res.data);
+      } catch (e) {
+        error(`Failed to get shares for day ${day} %O`, e);
+        return;
+      }
+
+      if (!failure.hasOwnProperty('_id')) {
+        return;
+      }
+
+      delete failure._id;
+      delete failure._rev;
+      delete failure._type;
+      delete failure._meta;
+
+      let successful = await getSuccessShares(conn, success, day);
+      let failures = await getFailureShares(conn, failure, day);
+      let completed = successful.concat(failures);
+
       trace(`complete tasks for ${day} %O`, completed);
       // completed.concat(await getShareFail(shares));
       // completed.concat(await getEmailSuccess(shares));
@@ -516,7 +577,7 @@ async function getJobsSuccess(conn, jobs, dates) {
   );
 }
 
-async function getFinishedShares(conn, shares, day) {
+async function getSuccessShares(conn, shares, day) {
   return Promise.map(
     Object.keys(shares),
     async (sid) => {
@@ -580,6 +641,82 @@ async function getFinishedShares(conn, shares, day) {
         'event time': moment(
           Object.values(share.updates)
             .filter((s) => s.status === 'success')
+            .map((s) => s.time)
+            .shift()
+        ).format('MM/DD/YYYY hh:mm'),
+        'event type': 'share',
+        ...details,
+      };
+    },
+    { concurrency: 10 }
+  );
+}
+
+async function getFailureShares(conn, shares, day) {
+  return Promise.map(
+    Object.keys(shares),
+    async (sid) => {
+      trace(`Getting data for share id: ${sid}`);
+      let share;
+      try {
+        share = await tryFetchGet(conn, {
+          path: `/bookmarks/services/trellis-shares/jobs-failure/day-index/${day}/${sid}`,
+        }).then((res) => res.data);
+      } catch (e) {
+        error(`Failed to fetch share ${sid} %O`, e);
+        return;
+      }
+      if (!share.hasOwnProperty('_id')) {
+        return;
+      }
+
+      let vdoc;
+      try {
+        vdoc = await tryFetchGet(conn, {
+          path: share.config.src,
+        }).then((res) => res.data);
+      } catch (e) {
+        error(`Failed to fetch document shared in job ${sid} %O: %O`, share, e);
+        return;
+      }
+      if (!vdoc.hasOwnProperty('_id')) {
+        return;
+      }
+
+      let partner;
+      try {
+        partner = await tryFetchGet(conn, {
+          path: share.config.chroot.split('/').slice(0, -2).join('/'),
+        }).then((res) => res.data);
+      } catch (e) {
+        error(`Failed to fetch partner in share job ${sid} %O', e`);
+        return;
+      }
+      if (!partner.hasOwnProperty('_id')) {
+        return;
+      }
+
+      let details;
+      let partnerEmail;
+      trace(`${share.config.doctype}`);
+      switch (share.config.doctype) {
+        case 'cois':
+          partnerEmail = partner['coi-emails'];
+          details = getCoiDetails(vdoc);
+          break;
+        case 'fsqa-audits':
+          partnerEmail = partner['fsqa-emails'];
+          details = getAuditDetails(vdoc);
+          break;
+      }
+
+      return {
+        'trading partner masterid': partner.masterid,
+        'trading partner name': partner.name,
+        'recipient email address': partnerEmail,
+        'event time': moment(
+          Object.values(share.updates)
+            .filter((s) => s.status === 'failure')
             .map((s) => s.time)
             .shift()
         ).format('MM/DD/YYYY hh:mm'),
