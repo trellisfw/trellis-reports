@@ -635,6 +635,8 @@ async function getSuccessShares(conn, shares, day) {
       }
 
       return {
+        status: 'success',
+        ...details,
         'trading partner masterid': partner.masterid,
         'trading partner name': partner.name,
         'recipient email address': partnerEmail,
@@ -645,7 +647,6 @@ async function getSuccessShares(conn, shares, day) {
             .shift()
         ).format('MM/DD/YYYY hh:mm'),
         'event type': 'share',
-        ...details,
       };
     },
     { concurrency: 10 }
@@ -711,6 +712,8 @@ async function getFailureShares(conn, shares, day) {
       }
 
       return {
+        status: 'failure',
+        ...details,
         'trading partner masterid': partner.masterid,
         'trading partner name': partner.name,
         'recipient email address': partnerEmail,
@@ -721,7 +724,6 @@ async function getFailureShares(conn, shares, day) {
             .shift()
         ).format('MM/DD/YYYY hh:mm'),
         'event type': 'share',
-        ...details,
       };
     },
     { concurrency: 10 }
@@ -922,6 +924,7 @@ function createEventLog(data) {
     data.trellisShares.filter((d) => d !== null && d !== undefined),
     {
       Headers: [
+        'status',
         'document id',
         'document name',
         'document type',
