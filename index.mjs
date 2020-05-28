@@ -21,8 +21,12 @@ let TRELLIS_TOKEN = config.get('token');
 (async () => {
   let program = new commander.Command();
   program
-    .option('-q, --queue <queue>', '`jobs` or `jobs-success`', 'jobs-success')
-    .option('-s, --state <state>', 'only generate a jobs report', 'true')
+    .option('-q, --queue <queue>', '`waiting` or `complete`', 'complete')
+    .option(
+      '-s, --state <state>',
+      'whether or not to generate the current state report',
+      'true'
+    )
     .option('-d --domain <domain>', 'domain without https', 'localhost')
     .option('-t --token <token>', 'token', 'god')
     .option(
