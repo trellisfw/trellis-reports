@@ -608,7 +608,7 @@ function getCoiDetails(vdoc) {
           })
         )
         .format('MM/DD/YYYY'),
-      'audit organization': '',
+      'audit organization name': '',
       'audit expiration date': '',
       'audit score': '',
     };
@@ -663,7 +663,7 @@ function createDocumentShares(data) {
         'coi producer': doc['coi producer'],
         'coi insured': doc['coi insured'],
         'coi expiration date': doc['coi expiration date'],
-        'audit organization': doc['audit organization'],
+        'audit organization name': doc['audit organization name'],
         'audit expiration date': doc['audit expiration date'],
         'audit score': doc['audit score'],
       });
@@ -681,7 +681,7 @@ function createDocumentShares(data) {
           'coi producer': doc['coi producer'],
           'coi insured': doc['coi insured'],
           'coi expiration date': doc['coi expiration date'],
-          'audit organization': doc['audit organization'],
+          'audit organization name': doc['audit organization name'],
           'audit expiration date': doc['audit expiration date'],
           'audit score': doc['audit score'],
         });
@@ -703,7 +703,7 @@ function createDocumentShares(data) {
       'coi producer',
       'coi insured',
       'coi expiration date',
-      'audit organization',
+      'audit organization name',
       'audit expiration date',
       'audit score',
     ],
@@ -741,7 +741,7 @@ function createUserAccess(tradingPartners) {
       users.push(props);
     } else {
       docs.forEach((doc) => {
-        users.push({ ...tradingPartners[pid].documents[doc], ...props });
+        users.push({ ...props, ...tradingPartners[pid].documents[doc] });
       });
     }
   });
