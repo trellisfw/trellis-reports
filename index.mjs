@@ -25,13 +25,13 @@ let TRELLIS_TOKEN = config.get('token');
     .option(
       '-s, --state <state>',
       'whether or not to generate the current state report',
-      'true'
+      'true',
     )
     .option('-d --domain <domain>', 'domain without https', 'localhost')
     .option('-t --token <token>', 'token', 'god')
     .option(
       '-f, --file <file>',
-      'location to save reports, if none specified will upload to <domain>'
+      'location to save reports, if none specified will upload to <domain>',
     );
   program.parse(process.argv);
 
@@ -48,7 +48,7 @@ let TRELLIS_TOKEN = config.get('token');
 
   if (TRELLIS_URL === 'https://localhost') {
     trace(
-      `Setting NODE_TLS_REJECT_UNAUTHORIZED = 0 because domain is localhost`
+      `Setting NODE_TLS_REJECT_UNAUTHORIZED = 0 because domain is localhost`,
     );
     process.env.NODE_TLS_REJECT_UNAUTHORIZED = 0;
   }
@@ -84,7 +84,7 @@ let TRELLIS_TOKEN = config.get('token');
       documentShares,
       eventLog,
       // program.queue,
-      program.file
+      program.file,
     );
   } else {
     await uploadReports(
@@ -92,7 +92,7 @@ let TRELLIS_TOKEN = config.get('token');
       eventLog,
       userAccess,
       documentShares,
-      program.queue
+      program.queue,
     );
   }
 })();
@@ -153,7 +153,7 @@ async function getState(conn) {
       await getPartnerCois(conn, tradingPartners, pid);
       await getPartnerAudits(conn, tradingPartners, pid);
     },
-    { concurrency: 10 }
+    { concurrency: 10 },
   );
 
   trace('Getting COI list');
@@ -183,7 +183,7 @@ async function getState(conn) {
       trace(`Getting COI ${coi}`);
       await getCoiShares(conn, tradingPartners, cois, coi);
     },
-    { concurrency: 10 }
+    { concurrency: 10 },
   );
 
   trace('Getting Audit Shares');
@@ -543,15 +543,20 @@ async function getJobsFuture(conn, jobs) {
         ...details,
       };
     },
-    { concurrency: 10 }
+    { concurrency: 10 },
   );
 }
 
 async function getFinishedJobs(conn, jobs, dates) {
   if (dates === undefined || dates.length === 0) {
+    const today = moment();
     dates = [
       moment
-        .max(Object.keys(jobs['day-index']).map((day) => moment(day)))
+        .max(
+          Object.keys(jobs['day-index'])
+            .map((day) => moment(day))
+            .filter((day) => day.isBefore(today)),
+        )
         .format('YYYY-MM-DD'),
     ];
   }
@@ -618,7 +623,7 @@ async function getFinishedJobs(conn, jobs, dates) {
       // completed.concat(await getEmailFail(shares));
       return completed;
     },
-    { concurrency: 10 }
+    { concurrency: 10 },
   );
 }
 
@@ -698,12 +703,12 @@ async function getSuccessShares(conn, shares, day) {
           Object.values(share.updates)
             .filter((s) => s.status === 'success')
             .map((s) => s.time)
-            .shift()
+            .shift(),
         ).format('MM/DD/YYYY hh:mm'),
         'event type': 'share',
       };
     },
-    { concurrency: 10 }
+    { concurrency: 10 },
   );
 }
 
@@ -783,12 +788,12 @@ async function getFailureShares(conn, shares, day) {
           Object.values(share.updates)
             .filter((s) => s.status === 'failure')
             .map((s) => s.time)
-            .shift()
+            .shift(),
         ).format('MM/DD/YYYY hh:mm'),
         'event type': 'share',
       };
     },
-    { concurrency: 10 }
+    { concurrency: 10 },
   );
 }
 
@@ -806,7 +811,7 @@ function getCoiDetails(vdoc) {
         .min(
           Object.values(vdoc.policies).map((policy) => {
             return moment(policy.expire_date);
-          })
+          }),
         )
         .format('MM/DD/YYYY'),
       'audit organization name': '',
@@ -834,7 +839,7 @@ function getAuditDetails(vdoc) {
       'audit organization name': vdoc.organization.name,
       'audit expiration date': moment(
         vdoc.certificate_validity_period.end,
-        'MM/DD/YYYY'
+        'MM/DD/YYYY',
       ).format('MM/DD/YYYY'),
       'audit score': `${vdoc.score.final.value} ${vdoc.score.final.units}`,
     };
@@ -1004,7 +1009,7 @@ function createEventLog(data) {
         'event time',
         'event type',
       ],
-    }
+    },
   );
   const wb = XLSX.utils.book_new();
   XLSX.utils.book_append_sheet(wb, ws);
@@ -1022,7 +1027,7 @@ async function saveReports(
   documentShares,
   eventLog,
   // queue,
-  filename
+  filename,
 ) {
   if (userAccess !== undefined) {
     trace('Writng User Access Report');
@@ -1063,7 +1068,7 @@ async function uploadReports(
   eventLog,
   userAccess,
   documentShares,
-  queue
+  queue,
 ) {
   const today = moment().format('YYYY-MM-DD');
   let reports = {};
