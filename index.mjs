@@ -246,7 +246,6 @@ async function getPartnerCois(conn, tradingPartners, pid) {
     if (!vdoc.hasOwnProperty('_id')) {
       return;
     }
-
     try {
       vdoc._meta = await tryFetchGet(conn, {
         path: vdoc._meta._id,
@@ -295,7 +294,6 @@ async function getPartnerAudits(conn, tradingPartners, pid) {
     if (!vdoc.hasOwnProperty('_id')) {
       return;
     }
-
     try {
       vdoc._meta = await tryFetchGet(conn, {
         path: vdoc._meta._id,
@@ -325,7 +323,6 @@ async function getCoiShares(conn, tradingPartners, cois, cid) {
   if (!vdoc.hasOwnProperty('_id')) {
     return;
   }
-
   try {
     vdoc._meta = await tryFetchGet(conn, {
       path: vdoc._meta._id,
@@ -367,7 +364,6 @@ async function getAuditShares(conn, tradingPartners, audits, aid) {
   if (!vdoc.hasOwnProperty('_id')) {
     return;
   }
-
   try {
     vdoc._meta = await tryFetchGet(conn, {
       path: vdoc._meta._id,
@@ -379,16 +375,18 @@ async function getAuditShares(conn, tradingPartners, audits, aid) {
 
   audits[aid] = { ...getAuditDetails(vdoc), shares: {} };
   Object.keys(tradingPartners)
-    .filter((pid) => {
-      tradingPartners[pid].documents.hasOwnProperty(vdoc._id);
-    })
+    // .filter((pid) => {
+    //   tradingPartners[pid].documents.hasOwnProperty(vdoc._id);
+    // })
     .forEach((pid) => {
-      trace(`Audit ${aid} shared with ${pid}`);
-      audits[aid].shares[pid] = {
-        'trading partner name': tradingPartners[pid]['trading partner name'],
-        'trading partner masterid':
-          tradingPartners[pid]['trading partner masterid'],
-      };
+      if (tradingPartners[pid].documents[vdoc._id] !== undefined) {
+        trace(`Audit ${aid} shared with ${pid}`);
+        audits[aid].shares[pid] = {
+          'trading partner name': tradingPartners[pid]['trading partner name'],
+          'trading partner masterid':
+            tradingPartners[pid]['trading partner masterid'],
+        };
+      }
     });
   return;
 }
@@ -461,7 +459,10 @@ async function getTrellisShares(conn, queue, dates) {
       delete jobFailure._rev;
       delete jobFailure._type;
 
-      let complete = { ...jobSuccess, ...jobFailure };
+      trace('successful job days: %O', jobSuccess['day-index']);
+      trace('failed job days: %O', jobFailure['day-index']);
+      let complete = { ...jobSuccess['day-index'], ...jobFailure['day-index'] };
+      // trace('completed job days: %O', jobFailure['day-index']);
 
       return getFinishedJobs(conn, complete, dates);
   }
@@ -498,7 +499,6 @@ async function getJobsFuture(conn, jobs) {
       if (!vdoc.hasOwnProperty('_id')) {
         return;
       }
-
       try {
         vdoc._meta = await tryFetchGet(conn, {
           path: vdoc._meta._id,
@@ -571,7 +571,7 @@ async function getFinishedJobs(conn, jobs, dates) {
       })
       .filter((day) => {
         trace(`day ${day}`);
-        return jobs['day-index'].hasOwnProperty(day);
+        return jobs.hasOwnProperty(day);
       }),
     async (day) => {
       info(`Getting trellis shares for ${day}`);
@@ -581,18 +581,16 @@ async function getFinishedJobs(conn, jobs, dates) {
           path: `/bookmarks/services/trellis-shares/jobs-success/day-index/${day}`,
         }).then((res) => res.data);
       } catch (e) {
+        success = {};
         error(`Failed to get shares for day ${day} %O`, e);
-        return;
       }
 
-      if (!success.hasOwnProperty('_id')) {
-        return;
+      if (success.hasOwnProperty('_id')) {
+        delete success._meta;
+        delete success._rev;
+        delete success._type;
+        delete success._id;
       }
-
-      delete success._id;
-      delete success._rev;
-      delete success._type;
-      delete success._meta;
 
       let failure;
       try {
@@ -600,18 +598,16 @@ async function getFinishedJobs(conn, jobs, dates) {
           path: `/bookmarks/services/trellis-shares/jobs-failure/day-index/${day}`,
         }).then((res) => res.data);
       } catch (e) {
+        failure = {};
         error(`Failed to get shares for day ${day} %O`, e);
-        return;
       }
 
-      if (!failure.hasOwnProperty('_id')) {
-        return;
+      if (failure.hasOwnProperty('_id')) {
+        delete failure._meta;
+        delete failure._rev;
+        delete failure._type;
+        delete failure._id;
       }
-
-      delete failure._id;
-      delete failure._rev;
-      delete failure._type;
-      delete failure._meta;
 
       let successful = await getSuccessShares(conn, success, day);
       let failures = await getFailureShares(conn, failure, day);
@@ -657,7 +653,6 @@ async function getSuccessShares(conn, shares, day) {
       if (!vdoc.hasOwnProperty('_id')) {
         return;
       }
-
       try {
         vdoc._meta = await tryFetchGet(conn, {
           path: vdoc._meta._id,
@@ -919,6 +914,7 @@ function createDocumentShares(data) {
   return XLSX.write(wb, {
     type: 'buffer',
     bookType: 'xlsx',
+    filename: `${moment().format('YYYY-MM-DD')}_document_shares.xlsx`,
     Props: {
       Title: `${moment().format('YYYY-MM-DD')}_document_shares.xlsx`,
     },
@@ -976,6 +972,7 @@ function createUserAccess(tradingPartners) {
   return XLSX.write(wb, {
     type: 'buffer',
     bookType: 'xlsx',
+    filename: `${moment().format('YYYY-MM-DD')}_user_access.xlsx`,
     Props: {
       Title: `${moment().format('YYYY-MM-DD')}_user_access.xlsx`,
     },
@@ -1016,6 +1013,7 @@ function createEventLog(data) {
   return XLSX.write(wb, {
     type: 'buffer',
     bookType: 'xlsx',
+    filename: `${moment().format('YYYY-MM-DD')}_event_log.xlsx`,
     Props: {
       Title: `${moment().format('YYYY-MM-DD')}_event_log.xlsx`,
     },
