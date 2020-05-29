@@ -247,6 +247,15 @@ async function getPartnerCois(conn, tradingPartners, pid) {
       return;
     }
 
+    try {
+      vdoc._meta = await tryFetchGet(conn, {
+        path: vdoc._meta._id,
+      }).then((res) => res.data);
+    } catch (e) {
+      error(`Failed to get ${vdoc._id} _meta: %O`, e);
+      return;
+    }
+
     if (tradingPartners[pid].documents[vdoc._id] === undefined) {
       tradingPartners[pid].documents[vdoc._id] = getCoiDetails(vdoc);
     }
@@ -287,6 +296,15 @@ async function getPartnerAudits(conn, tradingPartners, pid) {
       return;
     }
 
+    try {
+      vdoc._meta = await tryFetchGet(conn, {
+        path: vdoc._meta._id,
+      }).then((res) => res.data);
+    } catch (e) {
+      error(`Failed to get ${vdoc._id} _meta: %O`, e);
+      return;
+    }
+
     if (tradingPartners[pid].documents[vdoc._id] === undefined) {
       tradingPartners[pid].documents[vdoc._id] = getAuditDetails(vdoc);
     }
@@ -305,6 +323,15 @@ async function getCoiShares(conn, tradingPartners, cois, cid) {
   }
 
   if (!vdoc.hasOwnProperty('_id')) {
+    return;
+  }
+
+  try {
+    vdoc._meta = await tryFetchGet(conn, {
+      path: vdoc._meta._id,
+    }).then((res) => res.data);
+  } catch (e) {
+    error(`Failed to get ${vdoc._id} _meta: %O`, e);
     return;
   }
 
@@ -338,6 +365,15 @@ async function getAuditShares(conn, tradingPartners, audits, aid) {
   }
 
   if (!vdoc.hasOwnProperty('_id')) {
+    return;
+  }
+
+  try {
+    vdoc._meta = await tryFetchGet(conn, {
+      path: vdoc._meta._id,
+    }).then((res) => res.data);
+  } catch (e) {
+    error(`Failed to get ${vdoc._id} _meta: %O`, e);
     return;
   }
 
@@ -460,6 +496,15 @@ async function getJobsFuture(conn, jobs) {
         return;
       }
       if (!vdoc.hasOwnProperty('_id')) {
+        return;
+      }
+
+      try {
+        vdoc._meta = await tryFetchGet(conn, {
+          path: vdoc._meta._id,
+        }).then((res) => res.data);
+      } catch (e) {
+        error(`Failed to get ${vdoc._id} _meta: %O`, e);
         return;
       }
 
@@ -608,6 +653,15 @@ async function getSuccessShares(conn, shares, day) {
         return;
       }
 
+      try {
+        vdoc._meta = await tryFetchGet(conn, {
+          path: vdoc._meta._id,
+        }).then((res) => res.data);
+      } catch (e) {
+        error(`Failed to get ${vdoc._id} _meta: %O`, e);
+        return;
+      }
+
       let partner;
       try {
         partner = await tryFetchGet(conn, {
@@ -683,6 +737,14 @@ async function getFailureShares(conn, shares, day) {
       if (!vdoc.hasOwnProperty('_id')) {
         return;
       }
+      try {
+        vdoc._meta = await tryFetchGet(conn, {
+          path: vdoc._meta._id,
+        }).then((res) => res.data);
+      } catch (e) {
+        error(`Failed to get ${vdoc._id} _meta: %O`, e);
+        return;
+      }
 
       let partner;
       try {
@@ -736,7 +798,7 @@ function getCoiDetails(vdoc) {
       'document type': 'coi',
       'document id': vdoc._id,
       'document name': vdoc.certificate.file_name,
-      'upload date': moment(vdoc.certificate.docdate).format('MM/DD/YYYY'),
+      'upload date': moment.unix(vdoc._meta.stats.created).format('MM/DD/YYYY'),
       'coi holder': vdoc.holder.name,
       'coi producer': vdoc.producer.name,
       'coi insured': vdoc.insured.name,
@@ -764,7 +826,7 @@ function getAuditDetails(vdoc) {
       'document id': vdoc._id,
       'document type': 'audit',
       'document name': `${vdoc.scheme.name} Audit - ${vdoc.organization.name}`,
-      'upload date': '',
+      'upload date': moment.unix(vdoc._meta.stats.created).format('MM/DD/YYYY'),
       'coi holder': '',
       'coi producer': '',
       'coi insured': '',
