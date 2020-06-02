@@ -27,8 +27,8 @@ let TRELLIS_TOKEN = config.get('token');
       'whether or not to generate the current state report',
       'true',
     )
-    .option('-d --domain <domain>', 'domain without https', 'localhost')
-    .option('-t --token <token>', 'token', 'god')
+    .option('-d --domain <domain>', 'domain without https')
+    .option('-t --token <token>', 'token')
     .option(
       '-f, --file <file>',
       'location to save reports, if none specified will upload to <domain>',
