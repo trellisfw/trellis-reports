@@ -553,7 +553,7 @@ async function getFinishedJobs(conn, jobs, dates) {
     dates = [
       moment
         .max(
-          Object.keys(jobs['day-index'])
+          Object.keys(jobs)
             .map((day) => moment(day))
             .filter((day) => day.isBefore(today)),
         )
@@ -689,7 +689,7 @@ async function getSuccessShares(conn, shares, day) {
       }
 
       return {
-        status: 'success',
+        'share status': 'success',
         ...details,
         'trading partner masterid': partner.masterid,
         'trading partner name': partner.name,
@@ -774,7 +774,7 @@ async function getFailureShares(conn, shares, day) {
       }
 
       return {
-        status: 'failure',
+        'share status': 'failure',
         ...details,
         'trading partner masterid': partner.masterid,
         'trading partner name': partner.name,
@@ -988,7 +988,7 @@ function createEventLog(data) {
     data.trellisShares.filter((d) => d !== null && d !== undefined),
     {
       Headers: [
-        'status',
+        'share status',
         'document id',
         'document name',
         'document type',
