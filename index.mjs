@@ -79,7 +79,7 @@ let TRELLIS_TOKEN = config.get('token');
   let jobs = await getShares(conn, program.queue);
   const eventLog = createEventLog(jobs);
   if (program.file) {
-    await saveReports(
+    saveReports(
       userAccess,
       documentShares,
       eventLog,
@@ -1020,7 +1020,7 @@ function createEventLog(data) {
   });
 }
 
-async function saveReports(
+function saveReports(
   userAccess,
   documentShares,
   eventLog,
