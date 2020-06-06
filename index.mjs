@@ -1194,6 +1194,9 @@ async function ensureDayIndex(conn) {
     const res = await tryFetchGet(conn, {
       path: '/bookmarks/services/trellis-reports/reports/day-index',
     });
+    if (res.status === 200) {
+      return;
+    }
   } catch (e) {
     if (e.status !== 404) {
       throw e;
@@ -1242,6 +1245,7 @@ async function ensureDayIndex(conn) {
       data: {
         'trellis-reports': {
           _id: trellisReportsLoc,
+          _rev: 0,
         },
       },
     });
@@ -1256,6 +1260,7 @@ async function ensureDayIndex(conn) {
       data: {
         reports: {
           _id: reportsLoc,
+          _rev: 0,
         },
       },
     });
