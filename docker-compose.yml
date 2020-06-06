@@ -22,5 +22,5 @@ services:
     volumes:
       - ./services-available/trellis-reports/daily:/etc/cron.daily
       - ./services-available/trellis-reports:/code/trellis-reports
-    command: crond -f -d 8
+    command: cron -f
 
