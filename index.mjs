@@ -1068,6 +1068,20 @@ async function uploadReports(
   documentShares,
   queue,
 ) {
+  try {
+    await ensureDayIndex(conn);
+  } catch (e) {
+    error('Failed to ensure day index exists: %O', e);
+    error('Saving documents to disk');
+    saveReports(
+      userAccess,
+      documentShares,
+      eventLog,
+      moment().format('YYYY-MM-DD'),
+    );
+    return;
+  }
+
   const today = moment().format('YYYY-MM-DD');
   let reports = {};
 
@@ -1172,6 +1186,82 @@ async function uploadReports(
     });
   } catch (e) {
     error('Failed to link report locations %O', e);
+  }
+}
+
+async function ensureDayIndex(conn) {
+  try {
+    const res = await tryFetchGet(conn, {
+      path: '/bookmarks/services/trellis-reports/reports/day-index',
+    });
+  } catch (e) {
+    if (e.status !== 404) {
+      throw e;
+    }
+  }
+
+  let trellisReportsLoc;
+  try {
+    const res = await conn.post({
+      path: '/resources',
+      data: {},
+    });
+    if (res.headers.hasOwnProperty('content-location')) {
+      trellisReportsLoc = res.headers['content-location'].substr(1);
+      trace(`trellis-reports posted to ${trellisReportsLoc}`);
+    } else {
+      error('trellis-reports: no content location provided');
+    }
+  } catch (e) {
+    error('Failed to create trellis-reports service document %O', e);
+    throw e;
+  }
+
+  let reportsLoc;
+  try {
+    const res = await conn.post({
+      path: '/resources',
+      data: {
+        'day-index': {},
+      },
+    });
+    if (res.headers.hasOwnProperty('content-location')) {
+      reportsLoc = res.headers['content-location'].substr(1);
+      trace(`reports posted to ${reportsLoc}`);
+    } else {
+      error('reports: no content location provided');
+    }
+  } catch (e) {
+    error('Failed to create report document %O', e);
+    throw e;
+  }
+
+  try {
+    await conn.put({
+      path: '/bookmarks/services',
+      data: {
+        'trellis-reports': {
+          _id: trellisReportsLoc,
+        },
+      },
+    });
+  } catch (e) {
+    error('Failed to add trellis-reports to services: %O', e);
+    throw e;
+  }
+
+  try {
+    await conn.put({
+      path: '/bookmarks/services/trellis-reports',
+      data: {
+        reports: {
+          _id: reportsLoc,
+        },
+      },
+    });
+  } catch (e) {
+    error('Failed to add reports page to trellis-reports: %O', e);
+    throw e;
   }
 }
 
