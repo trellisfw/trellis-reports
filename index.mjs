@@ -431,15 +431,14 @@ async function getTrellisShares(conn, queue, dates) {
         }).then((res) => res.data);
       } catch (e) {
         error('failed to get trellis shares %O', e);
-        return;
+        jobSuccess = {'day-index': {}};
       }
-      if (!jobSuccess.hasOwnProperty('_id')) {
-        return;
+      if (jobSuccess.hasOwnProperty('_id')) {
+        delete jobSuccess._id;
+        delete jobSuccess._meta;
+        delete jobSuccess._rev;
+        delete jobSuccess._type;
       }
-      delete jobSuccess._id;
-      delete jobSuccess._meta;
-      delete jobSuccess._rev;
-      delete jobSuccess._type;
 
       let jobFailure;
       try {
@@ -449,19 +448,18 @@ async function getTrellisShares(conn, queue, dates) {
         }).then((res) => res.data);
       } catch (e) {
         error('failed to get trellis shares %O', e);
-        return;
+        jobFailure = {'day-index': {}};
       }
       if (!jobFailure.hasOwnProperty('_id')) {
-        return;
+        delete jobFailure._id;
+        delete jobFailure._meta;
+        delete jobFailure._rev;
+        delete jobFailure._type;
       }
-      delete jobFailure._id;
-      delete jobFailure._meta;
-      delete jobFailure._rev;
-      delete jobFailure._type;
 
       trace('successful job days: %O', jobSuccess['day-index']);
       trace('failed job days: %O', jobFailure['day-index']);
-      let complete = { ...jobSuccess['day-index'], ...jobFailure['day-index'] };
+      let complete = {...jobSuccess['day-index'], ...jobFailure['day-index']};
       // trace('completed job days: %O', jobFailure['day-index']);
 
       return getFinishedJobs(conn, complete, dates);
@@ -543,22 +541,17 @@ async function getJobsFuture(conn, jobs) {
         ...details,
       };
     },
-    { concurrency: 10 },
+    {concurrency: 10},
   );
 }
 
 async function getFinishedJobs(conn, jobs, dates) {
   if (dates === undefined || dates.length === 0) {
-    const today = moment();
-    dates = [
-      moment
-        .max(
-          Object.keys(jobs)
-            .map((day) => moment(day))
-            .filter((day) => day.isBefore(today)),
-        )
-        .format('YYYY-MM-DD'),
-    ];
+    const reportDate = moment().subtract(1, 'd').format('YYYY-MM-DD');
+    if (jobs[reportDate] === undefined) {
+      return [];
+    }
+    dates = [reportDate];
   }
   trace('dates for activities to be retrieved: %O', dates);
   trace('jobs days: %O', jobs['day-index']);
@@ -982,6 +975,10 @@ function createUserAccess(tradingPartners) {
 }
 
 function createEventLog(data) {
+  if (data.trellisShares.length === 0) {
+    return undefined;
+  }
+
   trace('event log %O', data.trellisShares);
   trace('Generating event report');
   const ws = XLSX.utils.json_to_sheet(
@@ -1135,27 +1132,29 @@ async function uploadReports(
     }
   }
 
-  try {
-    const res = await fetch(`${TRELLIS_URL}/resources`, {
-      method: 'POST',
-      headers: {
-        Authorization: `Bearer ${TRELLIS_TOKEN}`,
-        'Content-Type':
-          'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
-      },
-      body: eventLog,
-    });
-    if (res.ok) {
-      const loc = res.headers.get('content-location').substr(1);
-      trace(`event log report uploaded to ${loc}`);
-      reports['event-log'] = {
-        _id: loc,
-      };
-    } else {
-      error('Failed to post event log');
+  if (eventLog) {
+    try {
+      const res = await fetch(`${TRELLIS_URL}/resources`, {
+        method: 'POST',
+        headers: {
+          Authorization: `Bearer ${TRELLIS_TOKEN}`,
+          'Content-Type':
+            'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+        },
+        body: eventLog,
+      });
+      if (res.ok) {
+        const loc = res.headers.get('content-location').substr(1);
+        trace(`event log report uploaded to ${loc}`);
+        reports['event-log'] = {
+          _id: loc,
+        };
+      } else {
+        error('Failed to post event log');
+      }
+    } catch (e) {
+      error('Failed to upload event log report %O', e);
     }
-  } catch (e) {
-    error('Failed to upload event log report %O', e);
   }
 
   let dayReportsLoc;
