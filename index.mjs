@@ -1066,7 +1066,7 @@ async function uploadReports(
   queue
 ) {
   try {
-    await ensureDayIndex(conn);
+    await ensureEndpoints(conn);
   } catch (e) {
     error("Failed to ensure day index exists: %O", e);
     error("Saving documents to disk");
@@ -1080,118 +1080,119 @@ async function uploadReports(
   }
 
   const today = moment().format("YYYY-MM-DD");
-  let reports = {};
 
   if (userAccess) {
-    try {
-      const res = await fetch(`${TRELLIS_URL}/resources`, {
-        method: "POST",
-        headers: {
-          Authorization: `Bearer ${TRELLIS_TOKEN}`,
-          "Content-Type":
-            "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-        },
-        body: userAccess,
-      });
-      if (res.ok) {
-        const loc = res.headers.get("content-location").substr(1);
-        trace(`user access report uploaded to ${loc}`);
-        reports["current-tradingpartnershares"] = {
-          _id: loc,
-        };
-      } else {
-        error("failed to post user access report");
-      }
-    } catch (e) {
-      error("Failed to upload user access report %O", e);
-    }
+    await uploadUserAccess(conn, userAccess, today);
   }
 
   if (documentShares) {
-    try {
-      const res = await fetch(`${TRELLIS_URL}/resources`, {
-        method: "POST",
-        headers: {
-          Authorization: `Bearer ${TRELLIS_TOKEN}`,
-          "Content-Type":
-            "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-        },
-        body: documentShares,
-      });
-      if (res.ok) {
-        const loc = res.headers.get("content-location").substr(1);
-        trace(`document share report uploaded to ${loc}`);
-        reports["current-shareabledocs"] = {
-          _id: loc,
-        };
-      } else {
-        error("failed to post document share report");
-      }
-    } catch (e) {
-      error("Failed to upload document share report %O", e);
-    }
+    await uploadDocumentShares(conn, documentShares, today);
   }
 
   if (eventLog) {
-    try {
-      const res = await fetch(`${TRELLIS_URL}/resources`, {
-        method: "POST",
-        headers: {
-          Authorization: `Bearer ${TRELLIS_TOKEN}`,
-          "Content-Type":
-            "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-        },
-        body: eventLog,
-      });
-      if (res.ok) {
-        const loc = res.headers.get("content-location").substr(1);
-        trace(`event log report uploaded to ${loc}`);
-        reports["event-log"] = {
-          _id: loc,
-        };
-      } else {
-        error("Failed to post event log");
-      }
-    } catch (e) {
-      error("Failed to upload event log report %O", e);
-    }
-  }
-
-  let dayReportsLoc;
-  try {
-    const res = await conn.post({
-      path: "/resources",
-      data: reports,
-    });
-    if (res.headers.hasOwnProperty("content-location")) {
-      dayReportsLoc = res.headers["content-location"].substr(1);
-      trace(`day index posted to ${dayReportsLoc}`);
-    } else {
-      error("day report: no content location provided");
-    }
-  } catch (e) {
-    error("Failed to post reports %O", e);
-  }
-
-  try {
-    // TODO make something similar to tryFetchGet
-    await conn.put({
-      path: "/bookmarks/services/trellis-reports/reports/day-index",
-      data: {
-        [today]: {
-          _id: dayReportsLoc,
-        },
-      },
-    });
-  } catch (e) {
-    error("Failed to link report locations %O", e);
+    await uploadEventLog(conn, eventLog, today);
   }
 }
 
-async function ensureDayIndex(conn) {
+async function uploadUserAccess(conn, userAccess, today) {
+  try {
+    const res = await fetch(`${TRELLIS_URL}/resources`, {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${TRELLIS_TOKEN}`,
+        "Content-Type":
+          "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+      },
+      body: userAccess,
+    });
+    if (res.ok) {
+      const loc = res.headers.get("content-location").substr(1);
+      trace(`user access report uploaded to ${loc}`);
+      await conn.put({
+        path:
+          "/bookmarks/services/trellis-reports/current-tradingpartnershares/day-index",
+        data: {
+          [today]: {
+            _id: loc,
+            _rev: 0,
+          },
+        },
+      });
+    } else {
+      error("failed to post user access report");
+    }
+  } catch (e) {
+    error("Failed to upload user access report %O", e);
+  }
+}
+
+async function uploadDocumentShares(conn, documentShares, today) {
+  try {
+    const res = await fetch(`${TRELLIS_URL}/resources`, {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${TRELLIS_TOKEN}`,
+        "Content-Type":
+          "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+      },
+      body: documentShares,
+    });
+    if (res.ok) {
+      const loc = res.headers.get("content-location").substr(1);
+      trace(`document share report uploaded to ${loc}`);
+      await conn.put({
+        path:
+          "/bookmarks/services/trellis-reports/current-shareabledocs/day-index",
+        data: {
+          [today]: {
+            _id: loc,
+            _rev: 0,
+          },
+        },
+      });
+    } else {
+      error("failed to post document share report");
+    }
+  } catch (e) {
+    error("Failed to upload document share report %O", e);
+  }
+}
+
+async function uploadEventLog(conn, eventLog, today) {
+  try {
+    const res = await fetch(`${TRELLIS_URL}/resources`, {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${TRELLIS_TOKEN}`,
+        "Content-Type":
+          "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+      },
+      body: eventLog,
+    });
+    if (res.ok) {
+      const loc = res.headers.get("content-location").substr(1);
+      trace(`event log report uploaded to ${loc}`);
+      await conn.put({
+        path: "/bookmarks/services/trellis-reports/event-log/day-index",
+        data: {
+          [today]: {
+            _id: loc,
+            _rev: 0,
+          },
+        },
+      });
+    } else {
+      error("Failed to post event log");
+    }
+  } catch (e) {
+    error("Failed to upload event log report %O", e);
+  }
+}
+
+async function ensureEndpoints(conn) {
   try {
     const res = await tryFetchGet(conn, {
-      path: "/bookmarks/services/trellis-reports/reports/day-index",
+      path: "/bookmarks/services/trellis-reports/",
     });
     if (res.status === 200) {
       return;
@@ -1219,7 +1220,7 @@ async function ensureDayIndex(conn) {
     throw e;
   }
 
-  let reportsLoc;
+  let eventLogLoc;
   try {
     const res = await conn.post({
       path: "/resources",
@@ -1228,8 +1229,46 @@ async function ensureDayIndex(conn) {
       },
     });
     if (res.headers.hasOwnProperty("content-location")) {
-      reportsLoc = res.headers["content-location"].substr(1);
-      trace(`reports posted to ${reportsLoc}`);
+      eventLogLoc = res.headers["content-location"].substr(1);
+      trace(`reports posted to ${eventLogLoc}`);
+    } else {
+      error("reports: no content location provided");
+    }
+  } catch (e) {
+    error("Failed to create report document %O", e);
+    throw e;
+  }
+
+  let userAccessLoc;
+  try {
+    const res = await conn.post({
+      path: "/resources",
+      data: {
+        "day-index": {},
+      },
+    });
+    if (res.headers.hasOwnProperty("content-location")) {
+      userAccessLoc = res.headers["content-location"].substr(1);
+      trace(`reports posted to ${userAccessLoc}`);
+    } else {
+      error("reports: no content location provided");
+    }
+  } catch (e) {
+    error("Failed to create report document %O", e);
+    throw e;
+  }
+
+  let documentSharesLoc;
+  try {
+    const res = await conn.post({
+      path: "/resources",
+      data: {
+        "day-index": {},
+      },
+    });
+    if (res.headers.hasOwnProperty("content-location")) {
+      documentSharesLoc = res.headers["content-location"].substr(1);
+      trace(`reports posted to ${documentSharesLoc}`);
     } else {
       error("reports: no content location provided");
     }
@@ -1257,8 +1296,16 @@ async function ensureDayIndex(conn) {
     await conn.put({
       path: "/bookmarks/services/trellis-reports",
       data: {
-        reports: {
-          _id: reportsLoc,
+        "event-log": {
+          _id: eventLogLoc,
+          _rev: 0,
+        },
+        "current-tradingpartnershares": {
+          _id: userAccessLoc,
+          _rev: 0,
+        },
+        "current-shareabledocs": {
+          _id: documentSharesLoc,
           _rev: 0,
         },
       },
