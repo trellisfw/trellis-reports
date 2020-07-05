@@ -7,6 +7,7 @@ import moment from "moment";
 import commander from "commander";
 import client from "@oada/client";
 import fs from "fs";
+import _ from "lodash";
 
 const info = debug("report-gen:info");
 const trace = debug("report-gen:trace");
@@ -64,27 +65,13 @@ let TRELLIS_TOKEN = config.get("token");
     return;
   }
 
-  let userAccess;
-  let documentShares;
-  if (program.state.toLowerCase() === "true") {
-    // console.log(program.state);
-    trace("Getting share state");
-    const shares = await getState(conn);
-    userAccess = createUserAccess(shares.tradingPartners);
-    documentShares = createDocumentShares(shares.documents);
-  }
+  let {eventLog, userAccess, documentShares} = await generateReports(
+    program,
+    conn
+  );
 
-  trace(`Starting getShares`);
-  let jobs = await getShares(conn, program.queue);
-  const eventLog = createEventLog(jobs);
   if (program.file) {
-    saveReports(
-      userAccess,
-      documentShares,
-      eventLog,
-      // program.queue,
-      program.file
-    );
+    saveReports(userAccess, documentShares, eventLog, program.file);
   } else {
     await uploadReports(
       conn,
@@ -95,6 +82,96 @@ let TRELLIS_TOKEN = config.get("token");
     );
   }
 })();
+
+async function generateReports(program, conn) {
+  let userAccess;
+  let documentShares;
+  if (program.state.toLowerCase() === "true") {
+    let prevUserAccess;
+    try {
+      const userAccessDates = await tryFetchGet(conn, {
+        path: `/services/trellis-reports/current-tradingpartnershares/day-index`,
+      }).then((res) => res.data);
+      prevUserAccess = await fetch(
+        `${TRELLIS_URL}/services/trellis-reports/current-tradingpartnershares/day-index/${moment
+          .max(
+            Object.keys(userAccessDates).map((date) =>
+              moment(date, "YYYY-MM-DD")
+            )
+          )
+          .format("YYYY-MM-DD")}`,
+        {
+          method: "GET",
+          headers: {
+            Authorization: `Bearer ${TRELLIS_TOKEN}`,
+          },
+        }
+      )
+        .then((res) => res.buffer())
+        .then((buf) => XLSX.read(buf, {type: "buffer"}));
+    } catch (e) {
+      error("failed to get previous user access report: %O", e);
+      prevUserAccess = undefined;
+    }
+
+    let prevDocumentShares;
+    try {
+      const documentSharesDates = await tryFetchGet(conn, {
+        path: `/services/trellis-reports/current-shareabledocs/day-index`,
+      }).then((res) => res.data);
+      prevUserAccess = await fetch(
+        `${TRELLIS_URL}/services/trellis-reports/current-shareabledocs/day-index/${moment
+          .max(
+            Object.keys(documentSharesDates).map((date) =>
+              moment(date, "YYYY-MM-DD")
+            )
+          )
+          .format("YYYY-MM-DD")}`,
+        {
+          method: "GET",
+          headers: {
+            Authorization: `Bearer ${TRELLIS_TOKEN}`,
+          },
+        }
+      )
+        .then((res) => res.buffer())
+        .then((buf) => XLSX.read(buf, {type: "buffer"}));
+    } catch (e) {
+      error("failed to get previous user access report: %O", e);
+      prevUserAccess = undefined;
+    }
+
+    trace("Getting share state");
+    const shares = await getState(conn);
+    userAccess = createUserAccess(shares.tradingPartners, prevUserAccess);
+    documentShares = createDocumentShares(shares.documents, prevDocumentShares);
+  }
+
+  trace(`Starting getShares`);
+  let prevEventLog;
+  try {
+    const eventLogDates = await tryFetchGet(conn, {
+      path: "/services/trellis-reports/event-log/day-index",
+    }).then((res) => res.data);
+    prevEventLog = await fetch(
+      `${TRELLIS_URL}/services/trellis-reports/event-log/day-index/${moment
+        .max(Object.keys(eventLogDates).map((date) => moment(date)))
+        .format("YYYY-MM-DD")}`,
+      {
+        method: "GET",
+        Authorization: `Bearer ${TRELLIS_TOKEN}`,
+      }
+    )
+      .then((res) => res.buffer())
+      .then((buf) => XLSX.read(buf, {type: "buffer"}));
+  } catch (e) {
+    error("Failed to get previous event log: %O", e);
+    prevEventLog = undefined;
+  }
+  let jobs = await getShares(conn, program.queue);
+  const eventLog = createEventLog(jobs, prevEventLog);
+  return {userAccess, documentShares, eventLog};
+}
 
 async function getState(conn) {
   // const tradingPartners = await conn.get('/bookmarks/trellisfw/trading-partners');
@@ -840,7 +917,7 @@ function getAuditDetails(vdoc) {
 // to them
 //
 // build map in memory while construction "user access"
-function createDocumentShares(data) {
+function createDocumentShares(data, prevWb) {
   let docs = [];
   Object.values(data).forEach((doc) => {
     const pids = Object.keys(doc.shares);
@@ -901,6 +978,15 @@ function createDocumentShares(data) {
       "audit score",
     ],
   });
+
+  if (
+    prevWb &&
+    isDuplicateDocumentShares(prevWb.Sheets[prevWb.SheetNames[0]], ws)
+  ) {
+    info("generated document shares report is a duplicate of previous");
+    return undefined;
+  }
+
   const wb = XLSX.utils.book_new();
   XLSX.utils.book_append_sheet(wb, ws);
   return XLSX.write(wb, {
@@ -922,7 +1008,7 @@ function createDocumentShares(data) {
 //    - fsqa-audits
 //    - fsqa-certificates
 //    - letters-of-guarantee
-function createUserAccess(tradingPartners) {
+function createUserAccess(tradingPartners, prevWb) {
   let users = [];
   Object.keys(tradingPartners).forEach((pid) => {
     const props = {
@@ -959,6 +1045,15 @@ function createUserAccess(tradingPartners) {
       "audit score",
     ],
   });
+
+  if (
+    prevWb &&
+    isDuplicateUserAccess(prevWb.Sheets[prevWb.SheetNames[0]], ws)
+  ) {
+    info("Generated user access report mathes previous");
+    return undefined;
+  }
+
   const wb = XLSX.utils.book_new();
   XLSX.utils.book_append_sheet(wb, ws);
   return XLSX.write(wb, {
@@ -969,11 +1064,38 @@ function createUserAccess(tradingPartners) {
       Title: `${moment().format("YYYY-MM-DD")}_user_access.xlsx`,
     },
   });
-  // trace('User access report written');
-  return;
 }
 
-function createEventLog(data) {
+function isDuplicateUserAccess(prev, next) {
+  const prevRows = XLSX.utils.sheet_to_json(prev).sort((a, b) => {
+    // TODO
+    const cmp = a["trading partner masterid"].localeCompare(
+      b["trading partner masterid"]
+    );
+    return cmp !== 0 ? cmp : a["document id"].localeCompare(b["document id"]);
+  });
+  const nextRows = XLSX.utils.sheet_to_json(next).sort((a, b) => {
+    const cmp = a["trading partner masterid"].localeCompare(
+      b["trading partner masterid"]
+    );
+    return cmp !== 0 ? cmp : a["document id"].localeCompare(b["document id"]);
+  });
+  if (prevRows.length !== nextRows.length) {
+    return false;
+  }
+  return prevRows
+    .map((val, i) => {
+      return {
+        first: val,
+        second: nextRows[i],
+      };
+    })
+    .every(({first, second}) => {
+      return _.isEqual(first, second);
+    });
+}
+
+function createEventLog(data, prevWb) {
   if (data.trellisShares.length === 0) {
     return undefined;
   }
@@ -1004,16 +1126,60 @@ function createEventLog(data) {
       ],
     }
   );
+
+  if (prevWb && isDuplicateEventLog(prevWb.Sheets[prevWb.SheetNames[0]], ws)) {
+    info("generated event log report is a duplicate of previous");
+    return undefined;
+  }
+
   const wb = XLSX.utils.book_new();
   XLSX.utils.book_append_sheet(wb, ws);
   return XLSX.write(wb, {
     type: "buffer",
     bookType: "xlsx",
-    filename: `${moment().format("YYYY-MM-DD")}_event_log.xlsx`,
+    filename: `${moment().format("YYYY-MM-DD")}_event-log.xlsx`,
     Props: {
-      Title: `${moment().format("YYYY-MM-DD")}_event_log.xlsx`,
+      Title: `${moment().format("YYYY-MM-DD")}_event-log.xlsx`,
     },
   });
+}
+
+function isDuplicateEventLog(prev, next) {
+  const prevRows = XLSX.utils.sheet_to_json(prev).sort((a, b) => {
+    const aDate = moment(a["event time"], "MM/DD/YYY HH:mm");
+    const bDate = moment(b["event time"], "MM/DD/YYY HH:mm");
+    if (aDate.isBefore(bDate)) {
+      return -1;
+    } else if (aDate.isAfter(bDate)) {
+      return 1;
+    }
+    return a["trading partner masterid"].localeCompare(
+      b["trading partner masterid"]
+    );
+  });
+  const nextRows = XLSX.utils.sheet_to_json(next).sort((a, b) => {
+    const aDate = moment(a["event time"], "MM/DD/YYY HH:mm");
+    const bDate = moment(b["event time"], "MM/DD/YYY HH:mm");
+    if (aDate.isBefore(bDate)) {
+      return -1;
+    } else if (aDate.isAfter(bDate)) {
+      return 1;
+    }
+    return a["trading partner masterid"].localeCompare(
+      b["trading partner masterid"]
+    );
+  });
+  if (prevRows.length !== nextRows.length) {
+    return false;
+  }
+  return prevRows
+    .map((val, i) => {
+      return {
+        first: val,
+        second: nextRows[i],
+      };
+    })
+    .every(({first, second}) => _.isEqual(first, second));
 }
 
 function saveReports(
