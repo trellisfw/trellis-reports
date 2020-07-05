@@ -42,18 +42,6 @@
   resolved "https://registry.yarnpkg.com/@jsdevtools/ono/-/ono-7.1.2.tgz#373995bb40a6686589a7fcfec06b0e6e304ef6c6"
   integrity sha512-qS/a24RA5FEoiJS9wiv6Pwg2c/kiUo3IVUQcfeM9JvsR6pM8Yx+yl/6xWYLckZCT5jpLNhslgjiA8p/XcGyMRQ==
 
-"@oada/client@^1.0.2":
-  version "1.0.2"
-  resolved "https://registry.yarnpkg.com/@oada/client/-/client-1.0.2.tgz#9fc6c4f514ce9c37c97445bf94f6da106d591211"
-  integrity sha512-qVwhCt9WXn+jEIFSFuNGKMilXPeNmD8Idal+4J/GcyapehK0FpZjkv7tByKiyOaZucwcXBL+pus8PGokckZ+FQ==
-  dependencies:
-    "@oada/types" "^1.0.6"
-    debug "^4.1.1"
-    isomorphic-ws "^4.0.1"
-    ksuid "^1.2.0"
-    p-queue "^6.4.0"
-    ws "^7.2.3"
-
 "@oada/client@https://github.com/OADA/client.git":
   version "1.0.1"
   resolved "https://github.com/OADA/client.git#62ab8abb49a122d37270a12f70c7220989ecb527"
@@ -76,23 +64,7 @@
     glob "^7.1.6"
     mkdirp "^1.0.4"
 
-"@oada/oada-jobs@oada/oada-jobs":
-  version "2.0.1"
-  resolved "https://codeload.github.com/oada/oada-jobs/tar.gz/ce01e987030e955519c27fd003d319e888e9c5fd"
-  dependencies:
-    "@oada/client" "^1.0.2"
-    "@oada/types" "^1.0.10"
-    "@sindresorhus/is" "^2.1.1"
-    "@types/bluebird" "^3.5.31"
-    bluebird "^3.7.2"
-    debug "^4.1.1"
-    ksuid "^1.2.0"
-    moment "^2.25.3"
-    p-queue "^6.3.0"
-    p-timeout "^3.2.0"
-    tiny-json-http "^7.1.2"
-
-"@oada/types@^1.0.10", "@oada/types@^1.0.6":
+"@oada/types@^1.0.6":
   version "1.0.10"
   resolved "https://registry.yarnpkg.com/@oada/types/-/types-1.0.10.tgz#f12f2a01e52c1d7a2d9a7662ad9c426dff6bb91f"
   integrity sha512-epe7PxpruCw9M8g+IkPeev3W1BunQnSlTlE60OiW6UAuGjolNsMQxH7PZbpF0rg7XvwRywZnlL8B75GUmTKZRA==
@@ -100,16 +72,6 @@
     "@oada/formats" "^1.1.2"
     ajv "^6.12.2"
     typescript "^3.9.2"
-
-"@sindresorhus/is@^2.1.1":
-  version "2.1.1"
-  resolved "https://registry.yarnpkg.com/@sindresorhus/is/-/is-2.1.1.tgz#ceff6a28a5b4867c2dd4a1ba513de278ccbe8bb1"
-  integrity sha512-/aPsuoj/1Dw/kzhkgz+ES6TxG0zfTMGLwuK2ZG00k/iJzYHTLCE8mVU8EPqEOp/lmxPoq1C1C9RYToRKb2KEfg==
-
-"@types/bluebird@^3.5.31":
-  version "3.5.32"
-  resolved "https://registry.yarnpkg.com/@types/bluebird/-/bluebird-3.5.32.tgz#381e7b59e39f010d20bbf7e044e48f5caf1ab620"
-  integrity sha512-dIOxFfI0C+jz89g6lQ+TqhGgPQ0MxSnh/E4xuC0blhFtyW269+mPG5QeLgbdwst/LvdP8o1y0o/Gz5EHXLec/g==
 
 "@types/color-name@^1.1.1":
   version "1.1.1"
@@ -939,7 +901,7 @@ mkdirp@^1.0.4:
   resolved "https://registry.yarnpkg.com/mkdirp/-/mkdirp-1.0.4.tgz#3eb5ed62622756d79a5f0e2a221dfebad75c2f7e"
   integrity sha512-vVqVZQyf3WLx2Shd0qJ9xuvqgAyKPLAiqITEtqW0oIUjzo3PePDd6fW9iFz30ef7Ysp/oiWqbhszeGWW2T6Gzw==
 
-moment@^2.25.1, moment@^2.25.3:
+moment@^2.25.1:
   version "2.27.0"
   resolved "https://registry.yarnpkg.com/moment/-/moment-2.27.0.tgz#8bff4e3e26a236220dfe3e36de756b6ebaa0105d"
   integrity sha512-al0MUK7cpIcglMv3YF13qSgdAIqxHTO7brRtaz3DlSULbqfazqkc5kEjNrLDOM7fsjshoFIihnU8snrP7zUvhQ==
@@ -1052,7 +1014,7 @@ p-finally@^1.0.0:
   resolved "https://registry.yarnpkg.com/p-finally/-/p-finally-1.0.0.tgz#3fbcfb15b899a44123b34b6dcc18b724336a2cae"
   integrity sha1-P7z7FbiZpEEjs0ttzBi3JDNqLK4=
 
-p-queue@^6.3.0, p-queue@^6.4.0:
+p-queue@^6.4.0:
   version "6.4.0"
   resolved "https://registry.yarnpkg.com/p-queue/-/p-queue-6.4.0.tgz#5050b379393ea1814d6f9613a654f687d92c0466"
   integrity sha512-X7ddxxiQ+bLR/CUt3/BVKrGcJDNxBr0pEEFKHHB6vTPWNUhgDv36GpIH18RmGM3YGPpBT+JWGjDDqsVGuF0ERw==
@@ -1060,7 +1022,7 @@ p-queue@^6.3.0, p-queue@^6.4.0:
     eventemitter3 "^4.0.0"
     p-timeout "^3.1.0"
 
-p-timeout@^3.1.0, p-timeout@^3.2.0:
+p-timeout@^3.1.0:
   version "3.2.0"
   resolved "https://registry.yarnpkg.com/p-timeout/-/p-timeout-3.2.0.tgz#c7e17abc971d2a7962ef83626b35d635acf23dfe"
   integrity sha512-rhIwUycgwwKcP9yTOOFK/AKsAopjjCakVqLHePO3CC6Mir1Z99xT+R63jZxAT5lFZLa2inS5h+ZS2GvR99/FBg==
@@ -1327,11 +1289,6 @@ through@^2.3.6:
   version "2.3.8"
   resolved "https://registry.yarnpkg.com/through/-/through-2.3.8.tgz#0dd4c9ffaabc357960b1b724115d7e0e86a2e1f5"
   integrity sha1-DdTJ/6q8NXlgsbckEV1+Doai4fU=
-
-tiny-json-http@^7.1.2:
-  version "7.2.0"
-  resolved "https://registry.yarnpkg.com/tiny-json-http/-/tiny-json-http-7.2.0.tgz#1bc51d3c4ac0fe617b2c523319ca87d58934e703"
-  integrity sha512-blMwK3w6R+9/ZCMAlrAw4/yOmym6SNaF8LNHqjVnugtDAWNK/+HxK9AgEy8ynagRniMIiWhUcVst16Qumf66QQ==
 
 tmp@^0.0.33:
   version "0.0.33"
