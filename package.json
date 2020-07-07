@@ -12,7 +12,7 @@
   },
   "dependencies": {
     "-": "^0.0.1",
-    "@oada/client": "https://github.com/OADA/client.git",
+    "@oada/client": "^1.0.4",
     "bluebird": "^3.7.2",
     "commander": "^5.1.0",
     "debug": "^4.1.1",

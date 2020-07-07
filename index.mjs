@@ -409,12 +409,14 @@ async function getCoiShares(conn, tradingPartners, cois, cid) {
   }
 
   cois[cid] = {...getCoiDetails(vdoc), shares: {}};
+  const copysource = _.get(vdoc, '_meta.copy.src._ref') || false;
   Object.keys(tradingPartners)
     // .filter((pid) => {
     //   tradingPartners[pid].documents.hasOwnProperty(vdoc._id);
     // })
     .forEach((pid) => {
-      if (tradingPartners[pid].documents[vdoc._id] !== undefined) {
+      if (                  tradingPartners[pid].documents[vdoc._id]   !== undefined
+          || (copysource && tradingPartners[pid].documents[copysource] !== undefined)) {
         trace(`coi ${cid} shared with ${pid}`);
         cois[cid].shares[pid] = {
           "trading partner name": tradingPartners[pid]["trading partner name"],
@@ -450,12 +452,14 @@ async function getAuditShares(conn, tradingPartners, audits, aid) {
   }
 
   audits[aid] = {...getAuditDetails(vdoc), shares: {}};
+  const copysource = _.get(vdoc, '_meta.copy.src._ref') || false;
   Object.keys(tradingPartners)
     // .filter((pid) => {
     //   tradingPartners[pid].documents.hasOwnProperty(vdoc._id);
     // })
     .forEach((pid) => {
-      if (tradingPartners[pid].documents[vdoc._id] !== undefined) {
+      if (                  tradingPartners[pid].documents[vdoc._id]   !== undefined
+          || (copysource && tradingPartners[pid].documents[copysource] !== undefined)) {
         trace(`Audit ${aid} shared with ${pid}`);
         audits[aid].shares[pid] = {
           "trading partner name": tradingPartners[pid]["trading partner name"],
@@ -866,6 +870,7 @@ function getCoiDetails(vdoc) {
     return {
       "document type": "coi",
       "document id": vdoc._id,
+      "source id": _.has(vdoc, '_meta.copy.src._ref') ? vdoc._meta.copy.src._ref : vdoc._id, // if it's not a copy, it is it's own source
       "document name": vdoc.certificate.file_name,
       "upload date": moment.unix(vdoc._meta.stats.created).format("MM/DD/YYYY"),
       "coi holder": vdoc.holder.name,
@@ -893,6 +898,7 @@ function getAuditDetails(vdoc) {
     trace(`date: ${vdoc.certificate_validity_period.end}`);
     return {
       "document id": vdoc._id,
+      "source id": _.has(vdoc, '_meta.copy.src._ref') ? vdoc._meta.copy.src._ref : vdoc._id, // if it's not a copy, it is it's own source
       "document type": "audit",
       "document name": `${vdoc.scheme.name} Audit - ${vdoc.organization.name}`,
       "upload date": moment.unix(vdoc._meta.stats.created).format("MM/DD/YYYY"),
