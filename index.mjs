@@ -1156,7 +1156,7 @@ function createUserAccess(tradingPartners, prevRows) {
       numTradingPartners: 0,
       numTPWODocs: 0,
       totalShares: userAccessRows.length,
-    })
+    }),
     wb: XLSX.write(wb, {
       type: "buffer",
       bookType: "xlsx",
@@ -1232,6 +1232,7 @@ function createEventLog(data, prevRows) {
       }
       return acc;
     }, {
+      numEvents: nextRows.length,
       numDocuments: 0,
       numEmails: 0,
       numShares: 0,
