@@ -87,76 +87,17 @@ async function generateReports(program, conn) {
   let userAccess;
   let documentShares;
   if (program.state.toLowerCase() === "true") {
-    let prevUserAccessRows;
-    try {
-      const userAccessDates = await tryFetchGet(conn, {
-        path: `/services/trellis-reports/current-tradingpartnershares/day-index`,
-      }).then((res) => res.data);
-      const prevUserAccess = await fetch(
-        `${TRELLIS_URL}/services/trellis-reports/current-tradingpartnershares/day-index/${moment
-          .max(
-            Object.keys(userAccessDates).map((date) =>
-              moment(date, "YYYY-MM-DD")
-            )
-          )
-          .format("YYYY-MM-DD")}`,
-        {
-          method: "GET",
-          headers: {
-            Authorization: `Bearer ${TRELLIS_TOKEN}`,
-          },
-        }
-      )
-        .then((res) => res.buffer())
-        .then((buf) => XLSX.read(buf, {type: "buffer"}));
-      prevUserAccessRows = XLSX.utils.sheet_to_json(
-        prevUserAccess.Sheets[prevUserAccess.SheetNames[0]]
-      ).sort((a, b) => {
-        const cmp = a["trading partner masterid"].localeCompare(
-          b["trading partner masterid"]
-        );
-        return cmp !== 0 ? cmp : a["document id"].localeCompare(b["document id"]);
-      });
-    } catch (e) {
-      error("failed to get previous user access report: %O", e);
-      prevUserAccessRows = undefined;
-    }
+    let prevUserAccessRows = await getPreviousReportRows(
+      conn,
+      `/bookmarks/services/trellis-reports/current-tradingpartnershares/day-index`,
+      'userAccess'
+    );
 
-    let prevDocumentSharesRows;
-    try {
-      const documentSharesDates = await tryFetchGet(conn, {
-        path: `/services/trellis-reports/current-shareabledocs/day-index`,
-      }).then((res) => res.data);
-      const prevDocumentShares = await fetch(
-        `${TRELLIS_URL}/services/trellis-reports/current-shareabledocs/day-index/${moment
-          .max(
-            Object.keys(documentSharesDates).map((date) =>
-              moment(date, "YYYY-MM-DD")
-            )
-          )
-          .format("YYYY-MM-DD")}`,
-        {
-          method: "GET",
-          headers: {
-            Authorization: `Bearer ${TRELLIS_TOKEN}`,
-          },
-        }
-      )
-        .then((res) => res.buffer())
-        .then((buf) => XLSX.read(buf, {type: "buffer"}));
-
-      prevDocumentSharesRows = XLSX.utils.sheet_to_json(ws).sort((a, b) => {
-        const cmp = a['document id'].localeCompare(b['document id']);
-        return cmp !== 0
-          ? cmp
-          : a['trading partner masterid'].localeCompare(
-            b['trading partner masterid']
-          );
-      });
-    } catch (e) {
-      error("failed to get previous user access report: %O", e);
-      prevDocumentSharesRows = undefined;
-    }
+    let prevDocumentSharesRows = await getPreviousReportRows(
+      conn,
+      `/bookmarks/services/trellis-reports/current-shareabledocs/day-index`,
+      'documentShares'
+    );
 
     trace("Getting share state");
     const shares = await getState(conn);
@@ -165,39 +106,11 @@ async function generateReports(program, conn) {
   }
 
   trace(`Starting getShares`);
-  let prevEventLogRows;
-  try {
-    const eventLogDates = await tryFetchGet(conn, {
-      path: "/services/trellis-reports/event-log/day-index",
-    }).then((res) => res.data);
-    const prevEventLog = await fetch(
-      `${TRELLIS_URL}/services/trellis-reports/event-log/day-index/${moment
-        .max(Object.keys(eventLogDates).map((date) => moment(date)))
-        .format("YYYY-MM-DD")}`,
-      {
-        method: "GET",
-        Authorization: `Bearer ${TRELLIS_TOKEN}`,
-      }
-    )
-      .then((res) => res.buffer())
-      .then((buf) => XLSX.read(buf, {type: "buffer"}));
-
-    prevEventLogRows = XLSX.utils.sheet_to_json(prev).sort((a, b) => {
-      const aDate = moment(a["event time"], "MM/DD/YYY HH:mm");
-      const bDate = moment(b["event time"], "MM/DD/YYY HH:mm");
-      if (aDate.isBefore(bDate)) {
-        return -1;
-      } else if (aDate.isAfter(bDate)) {
-        return 1;
-      }
-      return a["trading partner masterid"].localeCompare(
-        b["trading partner masterid"]
-      );
-    });
-  } catch (e) {
-    error("Failed to get previous event log: %O", e);
-    prevEventLogRows = undefined;
-  }
+  let prevEventLogRows = await getPreviousReportRows(
+    conn,
+    "/bookmarks/services/trellis-reports/event-log/day-index",
+    'eventLog'
+  );
   let jobs = await getShares(conn, program.queue);
   const eventLog = createEventLog(jobs, prevEventLogRows);
   return {userAccess, documentShares, eventLog};
@@ -1015,16 +928,9 @@ function createDocumentShares(data, prevRows) {
     ],
   });
 
-  const nextRows = XLSX.utils.sheet_to_json(ws).sort((a, b) => {
-    const cmp = a['document id'].localeCompare(b['document id']);
-    return cmp !== 0
-      ? cmp
-      : a['trading partner masterid'].localeCompare(
-        b['trading partner masterid']
-      );
-  });
+  const nextRows = getDocumentSharesRows(ws);
 
-  if (prevWb && isDuplicateReport(prevRows, nextRows)) {
+  if (prevRows && isDuplicateReport(prevRows, nextRows)) {
     info("generated document shares report is a duplicate of previous");
     return undefined;
   }
@@ -1032,53 +938,68 @@ function createDocumentShares(data, prevRows) {
   const wb = XLSX.utils.book_new();
   XLSX.utils.book_append_sheet(wb, ws);
   return {
-    statistics: nextRows.reduce((acc, row) => {
-      if (documents[row['document id']] === undefined) {
-        acc.numDocsToShare++;
-        documents[row['document id']] = {};
-        // TODO lookup document expiration date
-        if (row['trading partner masterid'] === '') {
-          acc.numDocsNotShared++;
-        }
-        const docKey = row['document id'].split("/")[1];
-        let vdoc = data[row['document id']];
-        if (vdoc === null || vdoc === undefined) {
-          return acc;
-        }
-        let exprDate;
-        switch (row['document type']) {
-          case 'coi':
-            exprDate = moment(
-              vdoc['coi expiration date'],
-              'MM/DD/YYYY'
-            );
-            break;
-          case 'audit':
-            exprDate = moment(
-              vdoc['audit expiration date'],
-              'MM/DD/YYYY'
-            );
-            break;
-        }
-        if (exprDate.isAfter(today)) {
-          acc.numExpiredDocuments++;
-        }
-      }
-      return acc;
-    }, {
-      numDocsToShare: 0,
-      numExpiredDocuments: 0,
-      numDocsNotShared: 0,
-    }),
+    statistics: getDocumentSharesStatistics(nextRows, data),
     wb: XLSX.write(wb, {
       type: "buffer",
       bookType: "xlsx",
-      filename: `${moment().format("YYYY-MM-DD")}_document_shares.xlsx`,
       Props: {
         Title: `${moment().format("YYYY-MM-DD")}_document_shares.xlsx`,
       },
     }),
   }
+}
+
+function getDocumentSharesStatistics(rows, data) {
+  const today = moment().format('YYYY-MM-DD');
+  return rows.reduce((acc, row) => {
+    if (data[row['document id']] === undefined) {
+      acc.numDocsToShare++;
+      data[row['document id']] = {};
+      // TODO lookup document expiration date
+      if (row['trading partner masterid'] === '') {
+        acc.numDocsNotShared++;
+      }
+      const docKey = row['document id'].split("/")[1];
+      let vdoc = data[row['document id']];
+      if (vdoc === null || vdoc === undefined) {
+        return acc;
+      }
+      let exprDate;
+      switch (row['document type']) {
+        case 'coi':
+          exprDate = moment(
+            vdoc['coi expiration date'],
+            'MM/DD/YYYY'
+          );
+          break;
+        case 'audit':
+          exprDate = moment(
+            vdoc['audit expiration date'],
+            'MM/DD/YYYY'
+          );
+          break;
+      }
+      if (exprDate.isAfter(today)) {
+        acc.numExpiredDocuments++;
+      }
+    }
+    return acc;
+  }, {
+    numDocsToShare: 0,
+    numExpiredDocuments: 0,
+    numDocsNotShared: 0,
+  })
+}
+
+function getDocumentSharesRows(ws) {
+  return XLSX.utils.sheet_to_json(ws).sort((a, b) => {
+    const cmp = a['document id'].localeCompare(b['document id']);
+    return cmp !== 0
+      ? cmp
+      : a['trading partner masterid'].localeCompare(
+        b['trading partner masterid']
+      );
+  })
 }
 
 // XXX Ensure all trading partners are listed even if they don't have access
@@ -1128,13 +1049,8 @@ function createUserAccess(tradingPartners, prevRows) {
     ],
   });
 
-  const nextRows = XLSX.utils.sheet_to_json(next).sort((a, b) => {
-    const cmp = a["trading partner masterid"].localeCompare(
-      b["trading partner masterid"]
-    );
-    return cmp !== 0 ? cmp : a["document id"].localeCompare(b["document id"]);
-  });
-  if (prevWb && isDuplicateReport(prevRows, nextRows)) {
+  const nextRows = getUserAccessRows(ws);
+  if (prevRows && isDuplicateReport(prevRows, nextRows)) {
     info("Generated user access report mathes previous");
     return undefined;
   }
@@ -1142,30 +1058,42 @@ function createUserAccess(tradingPartners, prevRows) {
   const wb = XLSX.utils.book_new();
   XLSX.utils.book_append_sheet(wb, ws);
   return {
-    statistics: nextRows.reduce((acc, row) => {
-      if (tradingPartners[row['trading partner masterid']] === undefined) {
-        acc.numTradingPartners++;
-        tradingPartners[row['trading partner masterid']] = {};
-        if (row['document type'] === undefined) {
-          acc.numTPWODocs++;
-          acc.totalShares--;
-        }
-      }
-      return acc;
-    }, {
-      numTradingPartners: 0,
-      numTPWODocs: 0,
-      totalShares: userAccessRows.length,
-    }),
+    statistics: getUserAccessStatistics(nextRows, tradingPartners),
     wb: XLSX.write(wb, {
       type: "buffer",
       bookType: "xlsx",
-      filename: `${moment().format("YYYY-MM-DD")}_user_access.xlsx`,
       Props: {
         Title: `${moment().format("YYYY-MM-DD")}_user_access.xlsx`,
       },
     }),
   }
+}
+
+function getUserAccessRows(ws) {
+  return XLSX.utils.sheet_to_json(ws).sort((a, b) => {
+    const cmp = a["trading partner masterid"].localeCompare(
+      b["trading partner masterid"]
+    );
+    return cmp !== 0 ? cmp : a["document id"].localeCompare(b["document id"]);
+  });
+}
+
+function getUserAccessStatistics(rows, tradingPartners) {
+  return rows.reduce((acc, row) => {
+    if (tradingPartners[row['trading partner masterid']] === undefined) {
+      acc.numTradingPartners++;
+      tradingPartners[row['trading partner masterid']] = {};
+      if (row['document type'] === undefined) {
+        acc.numTPWODocs++;
+        acc.totalShares--;
+      }
+    }
+    return acc;
+  }, {
+    numTradingPartners: 0,
+    numTPWODocs: 0,
+    totalShares: rows.length,
+  })
 }
 
 function createEventLog(data, prevRows) {
@@ -1200,19 +1128,8 @@ function createEventLog(data, prevRows) {
     }
   );
 
-  const nextRows = XLSX.utils.sheet_to_json(next).sort((a, b) => {
-    const aDate = moment(a["event time"], "MM/DD/YYY HH:mm");
-    const bDate = moment(b["event time"], "MM/DD/YYY HH:mm");
-    if (aDate.isBefore(bDate)) {
-      return -1;
-    } else if (aDate.isAfter(bDate)) {
-      return 1;
-    }
-    return a["trading partner masterid"].localeCompare(
-      b["trading partner masterid"]
-    );
-  });
-  if (prevWb && isDuplicateReport(prevRows, nextRows)) {
+  const nextRows = getEventLogRows(ws);
+  if (prevRows && isDuplicateReport(prevRows, nextRows)) {
     info("generated event log report is a duplicate of previous");
     return undefined;
   }
@@ -1220,32 +1137,35 @@ function createEventLog(data, prevRows) {
   const wb = XLSX.utils.book_new();
   XLSX.utils.book_append_sheet(wb, ws);
   return {
-    statistics: nextRows.reduce((acc, row) => {
-      if (eventLogDocuments[row['document id']] === undefined) {
-        eventLogDocuments[row['document id']] = {};
-        acc.numDocuments++;
-      }
-      if (row['event type'] === 'share') {
-        acc.numShares++;
-      } else if (row['event type'] === 'email') {
-        acc.numEmails++;
-      }
-      return acc;
-    }, {
-      numEvents: nextRows.length,
-      numDocuments: 0,
-      numEmails: 0,
-      numShares: 0,
-    }),
+    statistics: getEventLogStatistics(nextRows),
     wb: XLSX.write(wb, {
       type: "buffer",
       bookType: "xlsx",
-      filename: `${moment().format("YYYY-MM-DD")}_event-log.xlsx`,
       Props: {
         Title: `${moment().format("YYYY-MM-DD")}_event-log.xlsx`,
       },
     })
   };
+}
+
+function getEventLogStatistics(rows) {
+  return rows.reduce((acc, row) => {
+    if (eventLogDocuments[row['document id']] === undefined) {
+      eventLogDocuments[row['document id']] = {};
+      acc.numDocuments++;
+    }
+    if (row['event type'] === 'share') {
+      acc.numShares++;
+    } else if (row['event type'] === 'email') {
+      acc.numEmails++;
+    }
+    return acc;
+  }, {
+    numEvents: rows.length,
+    numDocuments: 0,
+    numEmails: 0,
+    numShares: 0,
+  });
 }
 
 function isDuplicateReport(prevRows, nextRows) {
@@ -1262,6 +1182,58 @@ function isDuplicateReport(prevRows, nextRows) {
     .every(({first, second}) => _.isEqual(first, second));
 }
 
+async function getPreviousReportRows(conn, path, type) {
+  try {
+    const dates = await tryFetchGet(conn, {
+      path: path,
+      // path: `/bookmarks/services/trellis-reports/current-tradingpartnershares/day-index`,
+    }).then((res) => res.data);
+    const prevReport = await fetch(
+      `${TRELLIS_URL}/path/${moment
+        .max(
+          Object.keys(dates).map((date) =>
+            moment(date, "YYYY-MM-DD")
+          )
+        )
+        .format("YYYY-MM-DD")}`,
+      {
+        method: "GET",
+        headers: {
+          Authorization: `Bearer ${TRELLIS_TOKEN}`,
+        },
+      }
+    )
+      .then((res) => res.buffer())
+      .then((buf) => XLSX.read(buf, {type: "buffer"}));
+    switch (type) {
+      case 'userAccess':
+        return getUserAccessRows(prevReport.Sheets[prevReport.SheetNames[0]]);
+      case 'eventLog':
+        return getEventLogRows(prevReport.Sheets[prevReport.SheetNames[0]]);
+      case 'documentShares':
+        return getDocumentSharesRows(prevReport.Sheets[prevReport.SheetNames[0]]);
+    }
+  } catch (e) {
+    error("failed to get previous report: %O", e);
+    return undefined;
+  }
+}
+
+function getEventLogRows(ws) {
+  return XLSX.utils.sheet_to_json(ws).sort((a, b) => {
+    const aDate = moment(a["event time"], "MM/DD/YYY HH:mm");
+    const bDate = moment(b["event time"], "MM/DD/YYY HH:mm");
+    if (aDate.isBefore(bDate)) {
+      return -1;
+    } else if (aDate.isAfter(bDate)) {
+      return 1;
+    }
+    return a["trading partner masterid"].localeCompare(
+      b["trading partner masterid"]
+    );
+  });
+}
+
 function saveReports(
   userAccess,
   documentShares,
@@ -1271,36 +1243,31 @@ function saveReports(
 ) {
   if (userAccess !== undefined) {
     trace("Writng User Access Report");
-    fs.writeFile(`${filename}_user_access.xlsx`, userAccess, (err) => {
-      if (err) {
-        error("Failed to write User Access Report %O", err);
-      } else {
-        info("User Access Report Written");
-      }
-    });
+    info("report statistics: %O", userAccess.statistics);
+    saveReport(userAccess, `${filename}_user_access.xlsx`);
   }
 
   if (documentShares !== undefined) {
     trace("Writng Document Share Report");
-    fs.writeFile(`${filename}_document_shares.xlsx`, documentShares, (err) => {
-      if (err) {
-        error("Failed to write Document Share Report %O", err);
-      } else {
-        info("Document Share Report Written");
-      }
-    });
+    info("report statistics: %O", documentShares.statistics);
+    saveReport(documentShares, `${filename}_document_shares.xlsx`);
   }
 
   if (eventLog !== undefined) {
     trace("Writing Event Log Report");
-    fs.writeFile(`${filename}_event_log.xlsx`, eventLog, (err) => {
-      if (err) {
-        error("Failed to write Event Log Report %O", err);
-      } else {
-        info("Event Log Report Written");
-      }
-    });
+    info("report statistics: %O", eventLog.statistics);
+    saveReport(eventLog, `${filename}_event_log.xlsx`);
   }
+}
+
+function saveReport(report, filename) {
+  fs.writeFile(filename, report.wb, (err) => {
+    if (err) {
+      error(`Failed to write ${filename} %O`, err);
+    } else {
+      info(`${filename} Written`);
+    }
+  });
 }
 
 async function uploadReports(
