@@ -953,10 +953,11 @@ function createDocumentShares(data, prevRows) {
 
 function getDocumentSharesStatistics(rows, data) {
   const today = moment().format('YYYY-MM-DD');
+  let documents = {}
   return rows.reduce((acc, row) => {
-    if (data[row['document id']] === undefined) {
+    if (documents[row['document id']] === undefined) {
       acc.numDocsToShare++;
-      data[row['document id']] = {};
+      documents[row['document id']] = {};
       // TODO lookup document expiration date
       if (row['trading partner masterid'] === '') {
         acc.numDocsNotShared++;
@@ -1061,7 +1062,7 @@ function createUserAccess(tradingPartners, prevRows) {
   const wb = XLSX.utils.book_new();
   XLSX.utils.book_append_sheet(wb, ws);
   return {
-    statistics: getUserAccessStatistics(nextRows, tradingPartners),
+    statistics: getUserAccessStatistics(nextRows),
     wb: XLSX.write(wb, {
       type: "buffer",
       bookType: "xlsx",
@@ -1081,7 +1082,8 @@ function getUserAccessRows(ws) {
   });
 }
 
-function getUserAccessStatistics(rows, tradingPartners) {
+function getUserAccessStatistics(rows) {
+  let tradingPartners = {};
   return rows.reduce((acc, row) => {
     if (tradingPartners[row['trading partner masterid']] === undefined) {
       acc.numTradingPartners++;
@@ -1153,6 +1155,7 @@ function createEventLog(data, prevRows) {
 }
 
 function getEventLogStatistics(rows) {
+  let eventLogDocuments = {};
   return rows.reduce((acc, row) => {
     if (eventLogDocuments[row['document id']] === undefined) {
       eventLogDocuments[row['document id']] = {};
