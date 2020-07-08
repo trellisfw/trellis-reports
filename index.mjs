@@ -352,7 +352,7 @@ async function getCoiShares(conn, tradingPartners, cois, cid) {
   }
 
   cois[cid] = {...getCoiDetails(vdoc), shares: {}};
-  const copysource = _.get(vdoc, '_meta.copy.src._ref') || false;
+  const copysource = _.get(vdoc, "_meta.copy.src._ref", false);
   Object.keys(tradingPartners)
     // .filter((pid) => {
     //   tradingPartners[pid].documents.hasOwnProperty(vdoc._id);
@@ -395,7 +395,7 @@ async function getAuditShares(conn, tradingPartners, audits, aid) {
   }
 
   audits[aid] = {...getAuditDetails(vdoc), shares: {}};
-  const copysource = _.get(vdoc, '_meta.copy.src._ref') || false;
+  const copysource = _.get(vdoc, "_meta.copy.src._ref", false);
   Object.keys(tradingPartners)
     // .filter((pid) => {
     //   tradingPartners[pid].documents.hasOwnProperty(vdoc._id);
@@ -874,6 +874,7 @@ function createDocumentShares(data, prevRows) {
       docs.push({
         "document name": doc["document name"],
         "document id": doc["document id"],
+        "source id": doc["source id"],
         "document type": doc["document type"],
         "upload date": doc["upload date"],
         "trading partner name": "",
@@ -891,6 +892,7 @@ function createDocumentShares(data, prevRows) {
         docs.push({
           "document name": doc["document name"],
           "document id": doc["document id"],
+          "source id": doc["source id"],
           "document type": doc["document type"],
           "upload date": doc["upload date"],
           "trading partner name": doc.shares[pid]["trading partner name"],
@@ -946,7 +948,7 @@ function createDocumentShares(data, prevRows) {
         Title: `${moment().format("YYYY-MM-DD")}_document_shares.xlsx`,
       },
     }),
-  }
+  };
 }
 
 function getDocumentSharesStatistics(rows, data) {
@@ -999,7 +1001,7 @@ function getDocumentSharesRows(ws) {
       : a['trading partner masterid'].localeCompare(
         b['trading partner masterid']
       );
-  })
+  });
 }
 
 // XXX Ensure all trading partners are listed even if they don't have access
@@ -1037,6 +1039,7 @@ function createUserAccess(tradingPartners, prevRows) {
       "trading partner masterid",
       "document type",
       "document id",
+      "source id",
       "document name",
       "upload date",
       "coi holder",
@@ -1066,7 +1069,7 @@ function createUserAccess(tradingPartners, prevRows) {
         Title: `${moment().format("YYYY-MM-DD")}_user_access.xlsx`,
       },
     }),
-  }
+  };
 }
 
 function getUserAccessRows(ws) {
@@ -1109,6 +1112,7 @@ function createEventLog(data, prevRows) {
       Headers: [
         "share status",
         "document id",
+        "source id",
         "document name",
         "document type",
         "upload date",
@@ -1346,7 +1350,7 @@ async function uploadReport(conn, report, path) {
         path: `${path}/${today}/_meta`,
         data: {
           statistics: report.statistics,
-        }
+        },
       });
     } else {
       error("failed to post report: ", path);
