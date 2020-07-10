@@ -18,6 +18,12 @@ const error = debug("report-gen:error");
 let TRELLIS_URL = `https://${config.get("domain")}`;
 let TRELLIS_TOKEN = config.get("token");
 
+const PATH_CONVERTER = {
+  eventLog: 'event-log',
+  userAccess: 'current-tradingpartnershares',
+  documentShares: 'current-shareabledocs',
+};
+
 (async () => {
   let program = new commander.Command();
   program
@@ -1176,7 +1182,8 @@ function getEventLogStatistics(rows) {
 }
 
 function isDuplicateReport(prevRows, nextRows) {
-  if (prevRows.length !== nextRows.length) {
+  if (!prevRows || !nextRows || prevRows.length !== nextRows.length) {
+    info('Number of rows in reports do not match');
     return false;
   }
   return prevRows
@@ -1192,11 +1199,11 @@ function isDuplicateReport(prevRows, nextRows) {
 async function getPreviousReportRows(conn, path, type) {
   try {
     const dates = await tryFetchGet(conn, {
-      path: path,
-      // path: `/bookmarks/services/trellis-reports/current-tradingpartnershares/day-index`,
+      path,
     }).then((res) => res.data);
-    const prevReport = await fetch(
-      `${TRELLIS_URL}/path/${moment
+    const prevDocx = await fetch(
+      `${TRELLIS_URL}${path}/${
+      moment
         .max(
           Object.keys(dates).map((date) =>
             moment(date, "YYYY-MM-DD")
@@ -1210,8 +1217,17 @@ async function getPreviousReportRows(conn, path, type) {
         },
       }
     )
-      .then((res) => res.buffer())
-      .then((buf) => XLSX.read(buf, {type: "buffer"}));
+      .then((res) => {
+        if (res.status !== 200) {
+          return undefined;
+        }
+        return res.buffer();
+      })
+
+    if (prevDocx === undefined) {
+      return undefined;
+    }
+    const prevReport = XLSX.read(prevDocx, {type: "buffer"});
     switch (type) {
       case 'userAccess':
         return getUserAccessRows(prevReport.Sheets[prevReport.SheetNames[0]]);
