@@ -42,9 +42,10 @@
   resolved "https://registry.yarnpkg.com/@jsdevtools/ono/-/ono-7.1.2.tgz#373995bb40a6686589a7fcfec06b0e6e304ef6c6"
   integrity sha512-qS/a24RA5FEoiJS9wiv6Pwg2c/kiUo3IVUQcfeM9JvsR6pM8Yx+yl/6xWYLckZCT5jpLNhslgjiA8p/XcGyMRQ==
 
-"@oada/client@https://github.com/OADA/client.git":
-  version "1.0.1"
-  resolved "https://github.com/OADA/client.git#62ab8abb49a122d37270a12f70c7220989ecb527"
+"@oada/client@^1.0.4":
+  version "1.0.4"
+  resolved "https://registry.yarnpkg.com/@oada/client/-/client-1.0.4.tgz#e00ccf2bc67e6b7c4ddbe33ba022c6dccb6e34ce"
+  integrity sha512-lPddepKajzj2j2r+O84dJ5v4U+Td9NuB/+0dU0qhEhnpnam+1IkZHD46MzMmrZLilrD3lyviK84O+jZhLBgYrw==
   dependencies:
     "@oada/types" "^1.0.6"
     debug "^4.1.1"
