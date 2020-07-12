@@ -5,6 +5,11 @@ services:
   # Overrides for oada-core services:
   ##########################################
 
+  # Add ourselves to yarn to do yarn install
+  yarn:
+    volumes:
+      - ./services-available/trellis-reports:/code/trellis-reports
+
   # Add ourselves to admin container:
   admin:
     volumes:
