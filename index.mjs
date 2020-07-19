@@ -38,6 +38,11 @@ const PATH_CONVERTER = {
     .option(
       "-f, --file <file>",
       "location to save reports, if none specified will upload to <domain>"
+    )
+    .option(
+      "--dates <dates>",
+      "comma separated list of dates <YYYY-MM-DD>",
+      ""
     );
   program.parse(process.argv);
 
@@ -59,6 +64,12 @@ const PATH_CONVERTER = {
     process.env.NODE_TLS_REJECT_UNAUTHORIZED = 0;
   }
 
+  const dates = program.dates
+    .split(",")
+    .map((d) => moment(d, "YYYY-MM-DD"))
+    .filter((d) => d.isValid())
+    .map((d) => d.format("YYYY-MM-DD"));
+
   let conn;
   try {
     conn = await client.connect({
@@ -71,9 +82,10 @@ const PATH_CONVERTER = {
     return;
   }
 
-  let {eventLog, userAccess, documentShares} = await generateReports(
+  let { eventLog, userAccess, documentShares } = await generateReports(
     program,
-    conn
+    conn,
+    dates
   );
 
   if (program.file) {
@@ -89,7 +101,7 @@ const PATH_CONVERTER = {
   }
 })();
 
-async function generateReports(program, conn) {
+async function generateReports(program, conn, dates) {
   let userAccess;
   let documentShares;
   if (program.state.toLowerCase() === "true") {
@@ -117,7 +129,7 @@ async function generateReports(program, conn) {
     "/bookmarks/services/trellis-reports/event-log/day-index",
     'eventLog'
   );
-  let jobs = await getShares(conn, program.queue);
+  let jobs = await getShares(conn, program.queue, dates);
   const eventLog = createEventLog(jobs, prevEventLogRows);
   return {userAccess, documentShares, eventLog};
 }
@@ -589,7 +601,7 @@ async function getFinishedJobs(conn, jobs, dates) {
     dates
       .map((day) => {
         trace(`day: ${day}`);
-        return moment(day).format("YYYY-MM-DD");
+        return moment(day, "YYYY-MM-DD").format("YYYY-MM-DD");
       })
       .filter((day) => {
         trace(`day ${day}`);
